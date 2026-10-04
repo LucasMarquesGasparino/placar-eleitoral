@@ -166,6 +166,8 @@ td.numeric, th.numeric { text-align: right; font-variant-numeric: tabular-nums; 
 .pred-cell-name { font-weight: 700; color: var(--ink); }
 .pred-cell-lula { color: #c0392b; font-weight: 700; }
 .pred-cell-flavio { color: #1a5276; font-weight: 700; }
+.pred-cell-y26 { color: var(--accent-dark); font-weight: 600; }
+.pred-cell-y22 { color: #9b6121; font-weight: 600; }
 .pred-row-projected { background: #fffcf5; }
 .source-badge { display: inline-block; padding: 3px 8px; border-radius: 6px; font-size: 9px; font-weight: 800; letter-spacing: .3px; }
 .source-real { background: #e2f1ef; color: var(--accent-dark); }

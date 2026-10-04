@@ -345,6 +345,7 @@ async function computeNationalPrediction() {
       flavioPercent: rowValid ? (rowFlavio / rowValid) * 100 : 0,
       source: rowSource,
       countedPct: rowCountedPct,
+      projectedPct: 100 - rowCountedPct,
     });
   }
 
@@ -427,6 +428,14 @@ function renderPrediction(prediction) {
     flavioCell.className = 'numeric pred-cell-flavio';
     flavioCell.textContent = formatPercent(row.flavioPercent);
 
+    const y26Cell = document.createElement('td');
+    y26Cell.className = 'numeric pred-cell-y26';
+    y26Cell.textContent = formatPercent(row.countedPct);
+
+    const y22Cell = document.createElement('td');
+    y22Cell.className = 'numeric pred-cell-y22';
+    y22Cell.textContent = formatPercent(row.projectedPct);
+
     const sourceCell = document.createElement('td');
     sourceCell.className = 'numeric';
     const badge = document.createElement('span');
@@ -442,7 +451,7 @@ function renderPrediction(prediction) {
     }
     sourceCell.append(badge);
 
-    tr.append(nameCell, lulaCell, flavioCell, sourceCell);
+    tr.append(nameCell, lulaCell, flavioCell, y26Cell, y22Cell, sourceCell);
     tbody.append(tr);
   }
 }
