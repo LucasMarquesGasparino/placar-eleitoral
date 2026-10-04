@@ -1,0 +1,51 @@
+plugins {
+    id 'com.android.application'
+}
+
+def webRoot = rootProject.projectDir.parentFile
+def generatedWebAssets = layout.buildDirectory.dir('generated/webAssets')
+
+tasks.register('syncWebAssets', Copy) {
+    from(webRoot) {
+        include 'index.html', 'app.js', 'styles.css', 'manifest.webmanifest', 'sw.js'
+        include 'assets/**', 'data/**'
+        into 'www'
+    }
+    into generatedWebAssets
+}
+
+android {
+    namespace 'br.com.lucasgasparino.placar'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'br.com.lucasgasparino.placar'
+        minSdk 23
+        targetSdk 34
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main.assets.srcDir generatedWebAssets
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
+        }
+        release {
+            minifyEnabled false
+        }
+    }
+}
+
+tasks.named('preBuild').configure {
+    dependsOn tasks.named('syncWebAssets')
+}

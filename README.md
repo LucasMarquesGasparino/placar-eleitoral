@@ -12,6 +12,19 @@ npm start
 
 Abra `http://127.0.0.1:4173` no navegador. O app não usa dependências npm externas.
 
+## APK Android
+
+O projeto inclui uma Activity Android que abre o app web empacotado no APK. A tela de São Paulo fixa a eleição de 2026 e consulta apenas os arquivos dessa eleição.
+
+Com o Android SDK instalado, gere o APK de depuração assim:
+
+```sh
+cd android
+./gradlew assembleDebug
+```
+
+O arquivo sai em `android/app/build/outputs/apk/debug/app-debug.apk`. Ele inclui o resumo histórico de 2022 e precisa de conexão à internet para consultar resultados ao vivo do TSE. O APK de depuração é assinado automaticamente para instalação e uso local. No Termux, o Gradle usa automaticamente o AAPT2 ARM64 instalado.
+
 ## Dados
 
 - **2022:** resumo por município derivado do arquivo oficial [Votação por seção eleitoral — 2022](https://dadosabertos.tse.jus.br/dataset/resultados-2022). O JSON gerado mantém os votos por candidatura e turno para Presidente; a tela soma os municípios quando a consulta é por estado ou País.

@@ -320,6 +320,12 @@ function populateCitySelect() {
 }
 
 function setActiveView(view) {
+  if (view === 'sao-paulo') {
+    app.year = '2026';
+    app.round = '1';
+    elements['year-select'].value = '2026';
+    elements['round-select'].value = '1';
+  }
   app.view = view;
   document.querySelectorAll('.view-tab').forEach((button) => {
     button.classList.toggle('active', button.dataset.view === view);
