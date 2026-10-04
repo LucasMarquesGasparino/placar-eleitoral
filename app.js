@@ -136,7 +136,7 @@ function collectCandidates(data) {
   const result = [];
   for (const cargo of data?.carg || []) {
     const cargoCode = String(cargo.cd ?? '').padStart(4, '0');
-    if (cargoCode && cargoCode !== '0001' && app.view !== 'sao-paulo') continue;
+    if (cargoCode && cargoCode !== '0001' && app.view !== 'cargos') continue;
     for (const group of cargo.agr || []) {
       for (const candidate of group.cand || []) result.push(candidate);
       for (const party of group.par || []) {
@@ -657,7 +657,7 @@ function populateCitySelect() {
 
 function setActiveView(view) {
   const previousView = app.view;
-  if (view === 'sao-paulo') {
+  if (view === 'cargos') {
     app.year = '2026';
     app.round = '1';
     elements['year-select'].value = '2026';
@@ -668,13 +668,13 @@ function setActiveView(view) {
   document.querySelectorAll('.view-tab').forEach((button) => {
     button.classList.toggle('active', button.dataset.view === view);
   });
-  const isSp = view === 'sao-paulo';
+  const isCargos = view === 'cargos';
   const isPred = view === 'previsao';
-  elements['year-field'].classList.toggle('hidden', isSp || isPred);
-  elements['round-field'].classList.toggle('hidden', isSp || isPred || app.year !== '2022');
-  elements['state-field'].classList.toggle('hidden', !['estado', 'cidade'].includes(view));
+  elements['year-field'].classList.toggle('hidden', isCargos || isPred);
+  elements['round-field'].classList.toggle('hidden', isCargos || isPred || app.year !== '2022');
+  elements['state-field'].classList.toggle('hidden', !['estado', 'cidade', 'cargos'].includes(view));
   elements['city-field'].classList.toggle('hidden', view !== 'cidade');
-  elements['office-field'].classList.toggle('hidden', !isSp);
+  elements['office-field'].classList.toggle('hidden', !isCargos);
   elements['states-panel'].classList.toggle('hidden', view !== 'geral' || app.year !== '2026');
   elements['foreign-panel'].classList.toggle('hidden', view !== 'pais');
   elements['prediction-panel'].classList.toggle('hidden', !isPred);
@@ -682,7 +682,7 @@ function setActiveView(view) {
   document.querySelector('.results-panel').classList.toggle('hidden', isPred);
   elements['filter-note'].textContent = isPred
     ? 'Projeção Lula × Flávio Bolsonaro baseada na interseção 2022 ∩ 2026'
-    : (isSp ? 'Resultados de 2026 para o estado de São Paulo' : 'Votação para Presidente da República');
+    : (isCargos ? `Resultados de 2026 em ${titleForUf(app.uf)}` : 'Votação para Presidente da República');
   renderCountryRows(app.year);
   refreshResults();
 }
@@ -694,7 +694,7 @@ function setScopeHeading() {
     estado: ['ESTADO', titleForUf(app.uf)],
     cidade: ['CIDADE', selectedLocation()?.name || app.cityCode || 'Selecione uma cidade'],
     previsao: ['PREVISÃO · PRESIDENTE', 'Lula × Flávio Bolsonaro'],
-    'sao-paulo': ['SÃO PAULO · 2026', 'Resultados no estado de São Paulo'],
+    cargos: [`${app.uf} · CARGOS ESTADUAIS 2026`, OFFICE_NAMES[app.office] || 'Cargos estaduais'],
   };
   const [eyebrow, title] = names[app.view] || names.geral;
   elements['scope-eyebrow'].textContent = eyebrow;
@@ -702,7 +702,7 @@ function setScopeHeading() {
 }
 
 function updateYearControls() {
-  elements['round-field'].classList.toggle('hidden', app.view === 'sao-paulo' || app.year !== '2022');
+  elements['round-field'].classList.toggle('hidden', app.view === 'cargos' || app.year !== '2022');
   elements['states-panel'].classList.toggle('hidden', app.view !== 'geral' || app.year !== '2026');
   elements['foreign-panel'].classList.toggle('hidden', app.view !== 'pais');
   elements['all-countries-button'].classList.toggle('hidden', app.view !== 'pais' || !app.selectedCountry);
@@ -848,15 +848,15 @@ async function fetchForeignResults() {
 
 function renderCandidateRows(result) {
   const rows = [...(result?.candidates || [])];
-  // Na visão São Paulo, ordenar por votos (decrescente); nas demais, por número de urna.
-  if (app.view === 'sao-paulo') rows.sort((a, b) => (b.votes || 0) - (a.votes || 0));
+  // Na visão de cargos estaduais, ordenar por votos (decrescente); nas demais, por número de urna.
+  if (app.view === 'cargos') rows.sort((a, b) => (b.votes || 0) - (a.votes || 0));
   elements['candidate-rows'].replaceChildren();
   if (!rows.length) {
     const row = document.createElement('tr');
     const cell = document.createElement('td');
     cell.colSpan = 4;
     cell.className = 'empty-cell';
-    cell.textContent = app.year === '2026' || app.view === 'sao-paulo'
+    cell.textContent = app.year === '2026' || app.view === 'cargos'
       ? 'Aguardando a publicação do próximo arquivo oficial do TSE.'
       : 'Não há dados para esta localidade e turno.';
     row.append(cell);
@@ -921,9 +921,9 @@ function updateProgressCards(result, sourceYear) {
 
 function renderResult(result, sourceYear = app.year) {
   setScopeHeading();
-  const isSp = app.view === 'sao-paulo';
-  elements['results-title'].textContent = isSp ? OFFICE_NAMES[app.office] : 'Presidente da República';
-  elements['order-note'].textContent = isSp
+  const isCargos = app.view === 'cargos';
+  elements['results-title'].textContent = isCargos ? OFFICE_NAMES[app.office] : 'Presidente da República';
+  elements['order-note'].textContent = isCargos
     ? 'Lista em ordem de votos (maior primeiro)'
     : 'Lista em ordem de número de urna';
   elements['table-footer'].textContent = result
@@ -985,7 +985,7 @@ async function requestLiveResult(scope, officeCode = '0001') {
 }
 
 async function loadLive() {
-  const officeCode = app.view === 'sao-paulo' ? app.office : '0001';
+  const officeCode = app.view === 'cargos' ? app.office : '0001';
   if (app.view === 'pais') {
     try {
       app.exteriorAggregate = await requestLiveResult({ uf: 'ZZ' }, '0001');
@@ -1006,7 +1006,7 @@ async function loadLive() {
     const location = selectedLocation();
     if (!location) throw new Error('Selecione uma cidade disponível nos dados do TSE.');
     scope = { uf: location.uf, municipalityCode: location.code };
-  } else scope = { uf: 'SP' };
+  } else scope = { uf: app.uf };
 
   const result = await requestLiveResult(scope, officeCode);
   renderResult(result, '2026');
@@ -1028,14 +1028,14 @@ async function refreshResults() {
     return;
   }
   app.busy = true;
-  const sourceYear = app.view === 'sao-paulo' ? '2026' : app.year;
+  const sourceYear = app.view === 'cargos' ? '2026' : app.year;
   setError('');
   elements['refresh-button'].disabled = true;
   setSyncStatus('Consultando dados do TSE…');
   updateYearControls();
   try {
     if (app.view === 'previsao') await loadPrediction();
-    else if (app.view === 'sao-paulo') await loadLive();
+    else if (app.view === 'cargos') await loadLive();
     else if (sourceYear === '2022') await loadHistoric();
     else await loadLive();
     setSyncStatus(`Atualizado às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`, sourceYear === '2026');
@@ -1121,7 +1121,7 @@ elements['city-select'].addEventListener('change', (event) => {
 
 elements['office-select'].addEventListener('change', (event) => {
   app.office = event.target.value;
-  elements['filter-note'].textContent = `Resultados de 2026 para ${OFFICE_NAMES[app.office]} em São Paulo`;
+  elements['filter-note'].textContent = `Resultados de 2026 para ${OFFICE_NAMES[app.office]} em ${titleForUf(app.uf)}`;
   refreshResults();
 });
 
