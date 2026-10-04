@@ -40,7 +40,7 @@
 
       <nav class="view-tabs" aria-label="Nível de consulta">
         <button class="view-tab active" data-view="geral" type="button">Geral</button>
-        <button class="view-tab" data-view="pais" type="button">País</button>
+        <button class="view-tab" data-view="pais" type="button">Países</button>
         <button class="view-tab" data-view="estado" type="button">Estado</button>
         <button class="view-tab" data-view="cidade" type="button">Cidade</button>
         <button class="view-tab sp-tab" data-view="sao-paulo" type="button"><span class="sp-spark">✳</span> São Paulo · cargos estaduais</button>
@@ -113,6 +113,27 @@
           <strong class="stat-value" id="electorate-count">—</strong>
           <span class="stat-foot" id="electorate-foot">Aptos nas seções totalizadas</span>
         </article>
+      </section>
+
+      <section class="foreign-panel hidden" id="foreign-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">EXTERIOR · PRESIDENTE</p>
+            <h2>Resultados por país</h2>
+          </div>
+          <button class="country-reset hidden" id="all-countries-button" type="button">Todos os países</button>
+        </div>
+        <p class="foreign-note" id="foreign-note">O total do exterior vem do arquivo oficial ZZ do TSE. As linhas agrupam os arquivos das localidades pelo país atribuído a cada cidade de votação; referência do mapeamento: <a href="https://urna-a-urna.ovitordelucca.chatgpt.site/" target="_blank" rel="noreferrer">Urna-a-Urna</a>.</p>
+        <div class="table-wrap">
+          <table class="country-table">
+            <thead>
+              <tr><th>País</th><th class="numeric">Localidades</th><th class="numeric">Seções totalizadas / total</th><th class="numeric">Votos válidos</th></tr>
+            </thead>
+            <tbody id="country-rows">
+              <tr><td colspan="4" class="empty-cell">Carregando localidades do exterior…</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section class="results-panel">

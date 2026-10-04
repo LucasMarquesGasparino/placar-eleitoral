@@ -31,7 +31,13 @@ const app = {
   office: '0003',
   historical: null,
   locations: [],
+  countryMap: [],
+  countryByCode: new Map(),
+  selectedCountry: '',
+  foreignResults: new Map(),
+  exteriorAggregate: null,
   busy: false,
+  refreshQueued: false,
   countdown: 300,
   syncTimer: null,
   countdownTimer: null,
@@ -44,6 +50,7 @@ const elements = Object.fromEntries([
   'partial-label', 'valid-votes', 'valid-foot', 'sections-count', 'sections-foot', 'progress-value',
   'progress-fill', 'progress-foot', 'electorate-count', 'electorate-foot', 'results-title',
   'order-note', 'candidate-rows', 'table-footer', 'states-panel', 'states-grid',
+  'foreign-panel', 'foreign-note', 'country-rows', 'all-countries-button',
 ].map((id) => [id, document.getElementById(id)]));
 
 const numberFormat = new Intl.NumberFormat('pt-BR');
@@ -196,12 +203,72 @@ function aggregateHistoric(records, round) {
   return { candidates, validVotes, progress: null, officeName: 'Presidente da República', isFinal: true };
 }
 
+function aggregateLiveResults(results) {
+  const entries = [...results.entries()];
+  if (!entries.length) return null;
+  const candidatesByKey = new Map();
+  const progress = { totalSections: 0, processedSections: 0, totalElectors: 0, processedElectors: 0 };
+  let validVotes = 0;
+  for (const [, result] of entries) {
+    validVotes += result.validVotes;
+    for (const candidate of result.candidates) {
+      const key = `${candidate.number}:${candidate.name}`;
+      const current = candidatesByKey.get(key) || { number: candidate.number, name: candidate.name, votes: 0 };
+      current.votes += candidate.votes;
+      candidatesByKey.set(key, current);
+    }
+    if (result.progress) {
+      progress.totalSections += result.progress.totalSections;
+      progress.processedSections += result.progress.processedSections;
+      progress.totalElectors += result.progress.totalElectors;
+      progress.processedElectors += result.progress.processedElectors;
+    }
+  }
+  const candidates = [...candidatesByKey.values()].sort((a, b) => {
+    const nA = Number(a.number);
+    const nB = Number(b.number);
+    if (Number.isFinite(nA) && Number.isFinite(nB) && nA !== nB) return nA - nB;
+    return a.name.localeCompare(b.name, 'pt-BR');
+  }).map((candidate) => ({
+    ...candidate,
+    percent: validVotes ? (candidate.votes / validVotes) * 100 : 0,
+  }));
+  progress.percent = progress.totalSections
+    ? Math.min(100, (progress.processedSections / progress.totalSections) * 100)
+    : 0;
+  return {
+    candidates, validVotes, progress,
+    officeName: 'Presidente da República',
+    isFinal: entries.every(([, result]) => result.isFinal),
+  };
+}
+
+function countriesForExterior() {
+  return [...new Set(app.countryMap.map((location) => location.country).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+}
+
+function resultsForCountry(country) {
+  const codes = new Set(app.countryMap
+    .filter((location) => location.country === country)
+    .map((location) => normalizeLocationCode(location.code)));
+  return new Map([...app.foreignResults.entries()].filter(([code]) => codes.has(code)));
+}
+
 function historicRecordsForSelection() {
   const records = app.historical?.records || [];
-  if (app.view === 'pais' || app.view === 'geral') return records;
+  if (app.view === 'geral') return records;
+  if (app.view === 'pais') {
+    return records.filter((record) => {
+      if (record.uf !== 'ZZ') return false;
+      const country = app.countryByCode.get(normalizeLocationCode(record.municipalityCode))?.country || 'País não identificado';
+      return !app.selectedCountry || country === app.selectedCountry;
+    });
+  }
   if (app.view === 'estado') return records.filter((record) => record.uf === app.uf);
   if (app.view === 'cidade') {
-    return records.filter((record) => record.uf === app.uf && record.municipalityCode === app.cityCode);
+    return records.filter((record) => record.uf === app.uf
+      && normalizeLocationCode(record.municipalityCode) === normalizeLocationCode(app.cityCode));
   }
   return [];
 }
@@ -231,16 +298,24 @@ async function fetchJson(url) {
   return response.json();
 }
 
+function normalizeLocationCode(value) {
+  return String(value ?? '').trim().replace(/^0+(?=\d)/, '');
+}
+
 function parseLocations(config) {
   const found = [];
   for (const area of config.abr || []) {
     const uf = String(area.cd || '').toUpperCase();
     for (const municipality of area.mu || []) {
+      const code = String(municipality.cd ?? '').trim().padStart(5, '0');
       found.push({
         uf,
-        code: String(municipality.cd || '').padStart(5, '0'),
+        code,
         name: municipality.nm || 'Localidade sem nome',
         isExterior: uf === 'ZZ',
+        country: uf === 'ZZ'
+          ? (app.countryByCode.get(normalizeLocationCode(code))?.country || 'País não identificado')
+          : '',
       });
     }
   }
@@ -248,23 +323,43 @@ function parseLocations(config) {
 }
 
 async function loadBaseData() {
-  const tasks = [fetch('./data/2022-presidencia-cidades.json').then((data) => { app.historical = data; })];
-  const municipalitiesUrl = `${officialBase(TSE.stateElection)}/config/mun-e${String(TSE.stateElection).padStart(6, '0')}-cm.json`;
-  tasks.push(fetchJson(municipalitiesUrl).then((config) => { app.locations = parseLocations(config); }).catch(() => {}));
-  await Promise.allSettled(tasks);
+  const municipalitiesUrl = `${officialBase(TSE.federalElection)}/config/mun-e${String(TSE.federalElection).padStart(6, '0')}-cm.json`;
+  const [historyResult, mapResult, municipalitiesResult] = await Promise.allSettled([
+    fetchJson('./data/2022-presidencia-cidades.json'),
+    fetchJson('./data/exterior-country-map.json'),
+    fetchJson(municipalitiesUrl),
+  ]);
+  app.historical = historyResult.status === 'fulfilled' ? historyResult.value : null;
+  app.countryMap = mapResult.status === 'fulfilled' ? mapResult.value.locations || [] : [];
+  app.countryByCode = new Map(app.countryMap.map((location) => [normalizeLocationCode(location.code), location]));
 
-  if (!app.locations.length && app.historical?.records) {
-    const unique = new Map();
-    for (const record of app.historical.records) {
-      unique.set(`${record.uf}:${record.municipalityCode}`, {
-        uf: record.uf,
-        code: record.municipalityCode,
-        name: record.name,
-        isExterior: record.isExterior,
+  const locations = new Map();
+  if (municipalitiesResult.status === 'fulfilled') {
+    for (const location of parseLocations(municipalitiesResult.value)) {
+      locations.set(`${location.uf}:${normalizeLocationCode(location.code)}`, location);
+    }
+  }
+  for (const record of app.historical?.records || []) {
+    const normalizedCode = normalizeLocationCode(record.municipalityCode);
+    const key = `${record.uf}:${normalizedCode}`;
+    if (!locations.has(key)) {
+      locations.set(key, {
+        uf: record.uf, code: String(record.municipalityCode).padStart(5, '0'), name: record.name, isExterior: record.isExterior,
+        country: record.uf === 'ZZ' ? (app.countryByCode.get(normalizedCode)?.country || 'País não identificado') : '',
       });
     }
-    app.locations = [...unique.values()];
   }
+  for (const countryLocation of app.countryMap) {
+    const code = String(countryLocation.code).trim().padStart(5, '0');
+    const key = `ZZ:${normalizeLocationCode(code)}`;
+    const current = locations.get(key) || {};
+    locations.set(key, {
+      ...current, uf: 'ZZ', code,
+      name: current.name || countryLocation.city || 'Localidade no exterior',
+      isExterior: true, country: countryLocation.country || 'País não identificado',
+    });
+  }
+  app.locations = [...locations.values()];
   populateStateSelect();
   populateCitySelect();
 }
@@ -297,7 +392,7 @@ function populateCitySelect() {
   const sourceLocations = app.locations.length
     ? app.locations
     : (app.historical?.records || []).map((record) => ({
-      uf: record.uf, code: record.municipalityCode, name: record.name, isExterior: record.isExterior,
+      uf: record.uf, code: String(record.municipalityCode).padStart(5, '0'), name: record.name, isExterior: record.isExterior,
     }));
   const seen = new Set();
   const locations = sourceLocations.filter((location) => location.uf === app.uf)
@@ -320,12 +415,14 @@ function populateCitySelect() {
 }
 
 function setActiveView(view) {
+  const previousView = app.view;
   if (view === 'sao-paulo') {
     app.year = '2026';
     app.round = '1';
     elements['year-select'].value = '2026';
     elements['round-select'].value = '1';
   }
+  if (view !== 'pais' || previousView !== 'pais') app.selectedCountry = '';
   app.view = view;
   document.querySelectorAll('.view-tab').forEach((button) => {
     button.classList.toggle('active', button.dataset.view === view);
@@ -337,14 +434,16 @@ function setActiveView(view) {
   elements['city-field'].classList.toggle('hidden', view !== 'cidade');
   elements['office-field'].classList.toggle('hidden', !isSp);
   elements['states-panel'].classList.toggle('hidden', view !== 'geral' || app.year !== '2026');
+  elements['foreign-panel'].classList.toggle('hidden', view !== 'pais');
   elements['filter-note'].textContent = isSp ? 'Resultados de 2026 para o estado de São Paulo' : 'Votação para Presidente da República';
+  renderCountryRows(app.year);
   refreshResults();
 }
 
 function setScopeHeading() {
   const names = {
     geral: ['VISÃO GERAL', 'Brasil inteiro'],
-    pais: ['PAÍS · BRASIL', 'Brasil, incluindo exterior'],
+    pais: ['EXTERIOR · PAÍSES', app.selectedCountry || 'Todos os países'],
     estado: ['ESTADO', titleForUf(app.uf)],
     cidade: ['CIDADE', selectedLocation()?.name || app.cityCode || 'Selecione uma cidade'],
     'sao-paulo': ['SÃO PAULO · 2026', 'Resultados no estado de São Paulo'],
@@ -357,7 +456,117 @@ function setScopeHeading() {
 function updateYearControls() {
   elements['round-field'].classList.toggle('hidden', app.view === 'sao-paulo' || app.year !== '2022');
   elements['states-panel'].classList.toggle('hidden', app.view !== 'geral' || app.year !== '2026');
+  elements['foreign-panel'].classList.toggle('hidden', app.view !== 'pais');
+  elements['all-countries-button'].classList.toggle('hidden', app.view !== 'pais' || !app.selectedCountry);
   elements['round-select'].value = app.round;
+}
+
+function updateForeignNote(sourceYear) {
+  const note = elements['foreign-note'];
+  note.replaceChildren();
+  note.append(document.createTextNode(sourceYear === '2022'
+    ? 'Em 2022, votos são somados dos registros históricos por localidade; esse arquivo não informa total de seções. País associado à localidade de votação. Mapeamento: '
+    : 'Em 2026, cada linha soma arquivos municipais por país; “Todos os países” usa o arquivo oficial ZZ do TSE. País associado à localidade de votação. Mapeamento: '));
+  const link = document.createElement('a');
+  link.href = 'https://urna-a-urna.ovitordelucca.chatgpt.site/';
+  link.target = '_blank';
+  link.rel = 'noreferrer';
+  link.textContent = 'Urna-a-Urna';
+  note.append(link, document.createTextNode('.'));
+}
+
+function renderCountryRows(sourceYear = app.year) {
+  const tbody = elements['country-rows'];
+  updateForeignNote(sourceYear);
+  tbody.replaceChildren();
+  const countries = countriesForExterior();
+  if (!countries.length) {
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 4;
+    cell.className = 'empty-cell';
+    cell.textContent = 'Aguardando a lista de localidades internacionais do TSE.';
+    row.append(cell);
+    tbody.append(row);
+    return;
+  }
+
+  for (const country of countries) {
+    const row = document.createElement('tr');
+    if (app.selectedCountry === country) row.classList.add('selected');
+    const locations = app.countryMap.filter((location) => location.country === country);
+    const locationCodes = new Set(locations.map((location) => normalizeLocationCode(location.code)));
+    const localityCount = locations.length;
+    let processedText = '—';
+    let votesText = '—';
+    if (sourceYear === '2022') {
+      const records = (app.historical?.records || []).filter((record) => record.uf === 'ZZ'
+        && locationCodes.has(normalizeLocationCode(record.municipalityCode)));
+      if (records.length) votesText = formatNumber(aggregateHistoric(records, app.round).validVotes);
+    } else {
+      const result = aggregateLiveResults(resultsForCountry(country));
+      if (result) {
+        processedText = result.progress.totalSections
+          ? `${formatNumber(result.progress.processedSections)} / ${formatNumber(result.progress.totalSections)}`
+          : '—';
+        votesText = formatNumber(result.validVotes);
+      }
+    }
+
+    const countryCell = document.createElement('td');
+    const button = document.createElement('button');
+    button.className = 'country-name-button';
+    button.type = 'button';
+    button.dataset.country = country;
+    button.setAttribute('aria-pressed', String(app.selectedCountry === country));
+    button.textContent = country;
+    countryCell.append(button);
+    const locationsCell = document.createElement('td');
+    locationsCell.className = 'numeric';
+    locationsCell.textContent = formatNumber(localityCount);
+    const progressCell = document.createElement('td');
+    progressCell.className = 'numeric';
+    progressCell.textContent = processedText;
+    const votesCell = document.createElement('td');
+    votesCell.className = 'numeric';
+    votesCell.textContent = votesText;
+    row.append(countryCell, locationsCell, progressCell, votesCell);
+    tbody.append(row);
+  }
+  elements['all-countries-button'].classList.toggle('hidden', app.view !== 'pais' || !app.selectedCountry);
+}
+
+function displayCountrySelection() {
+  setScopeHeading();
+  updateYearControls();
+  renderCountryRows(app.year);
+  if (app.year === '2022') {
+    renderResult(aggregateHistoric(historicRecordsForSelection(), app.round), '2022');
+  } else if (app.selectedCountry) {
+    renderResult(aggregateLiveResults(resultsForCountry(app.selectedCountry)), '2026');
+  } else {
+    renderResult(app.exteriorAggregate || aggregateLiveResults(app.foreignResults), '2026');
+  }
+}
+
+async function fetchForeignResults() {
+  const locations = app.locations.filter((location) => location.uf === 'ZZ');
+  const batchSize = 24;
+  let completed = 0;
+  for (let start = 0; start < locations.length; start += batchSize) {
+    const batch = locations.slice(start, start + batchSize);
+    const responses = await Promise.allSettled(batch.map(async (location) => ({
+      code: normalizeLocationCode(location.code),
+      result: await requestLiveResult({ uf: 'ZZ', municipalityCode: location.code }, '0001'),
+    })));
+    for (const response of responses) {
+      if (response.status === 'fulfilled') app.foreignResults.set(response.value.code, response.value.result);
+    }
+    completed += batch.length;
+    setSyncStatus(`Exterior: ${formatNumber(completed)} / ${formatNumber(locations.length)} localidades`);
+    renderCountryRows('2026');
+    if (app.view === 'pais' && app.year === '2026') displayCountrySelection();
+  }
 }
 
 function renderCandidateRows(result) {
@@ -482,6 +691,7 @@ function renderStates(stateResults) {
 
 async function loadHistoric() {
   if (!app.historical) await loadBaseData();
+  renderCountryRows('2022');
   const records = historicRecordsForSelection();
   const result = aggregateHistoric(records, app.round);
   renderResult(result, '2022');
@@ -495,8 +705,21 @@ async function requestLiveResult(scope, officeCode = '0001') {
 
 async function loadLive() {
   const officeCode = app.view === 'sao-paulo' ? app.office : '0001';
+  if (app.view === 'pais') {
+    try {
+      app.exteriorAggregate = await requestLiveResult({ uf: 'ZZ' }, '0001');
+    } catch {
+      app.exteriorAggregate = null;
+    }
+    renderCountryRows('2026');
+    displayCountrySelection();
+    await fetchForeignResults();
+    if (app.view === 'pais' && app.year === '2026') displayCountrySelection();
+    return;
+  }
+
   let scope;
-  if (app.view === 'geral' || app.view === 'pais') scope = { uf: 'BR' };
+  if (app.view === 'geral') scope = { uf: 'BR' };
   else if (app.view === 'estado') scope = { uf: app.uf };
   else if (app.view === 'cidade') {
     const location = selectedLocation();
@@ -519,7 +742,10 @@ async function loadLive() {
 }
 
 async function refreshResults() {
-  if (app.busy) return;
+  if (app.busy) {
+    app.refreshQueued = true;
+    return;
+  }
   app.busy = true;
   const sourceYear = app.view === 'sao-paulo' ? '2026' : app.year;
   setError('');
@@ -542,6 +768,10 @@ async function refreshResults() {
     app.busy = false;
     elements['refresh-button'].disabled = false;
     app.countdown = 300;
+    if (app.refreshQueued) {
+      app.refreshQueued = false;
+      refreshResults();
+    }
   }
 }
 
@@ -562,6 +792,18 @@ function startSyncClock() {
 
 document.querySelectorAll('.view-tab').forEach((button) => {
   button.addEventListener('click', () => setActiveView(button.dataset.view));
+});
+
+elements['country-rows'].addEventListener('click', (event) => {
+  const button = event.target.closest('[data-country]');
+  if (!button) return;
+  app.selectedCountry = button.dataset.country;
+  displayCountrySelection();
+});
+
+elements['all-countries-button'].addEventListener('click', () => {
+  app.selectedCountry = '';
+  displayCountrySelection();
 });
 
 elements['refresh-button'].addEventListener('click', () => {
