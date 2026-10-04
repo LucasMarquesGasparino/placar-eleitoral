@@ -40,6 +40,7 @@
 
       <nav class="view-tabs" aria-label="Nível de consulta">
         <button class="view-tab active" data-view="geral" type="button">Geral</button>
+        <button class="view-tab pred-tab" data-view="previsao" type="button"><span class="pred-spark">⚡</span> Previsão</button>
         <button class="view-tab" data-view="pais" type="button">Países</button>
         <button class="view-tab" data-view="estado" type="button">Estado</button>
         <button class="view-tab" data-view="cidade" type="button">Cidade</button>
@@ -127,13 +128,67 @@
         <div class="table-wrap">
           <table class="country-table">
             <thead>
-              <tr><th>País</th><th class="numeric">Localidades</th><th class="numeric">Seções totalizadas / total</th><th class="numeric">Votos válidos</th></tr>
+              <tr><th>País</th><th class="numeric">Localidades</th><th class="numeric">Seções totalizadas / total</th><th class="numeric">Votos válidos</th><th class="numeric">Lula %</th><th class="numeric">Flávio %</th></tr>
             </thead>
             <tbody id="country-rows">
-              <tr><td colspan="4" class="empty-cell">Carregando localidades do exterior…</td></tr>
+              <tr><td colspan="6" class="empty-cell">Carregando localidades do exterior…</td></tr>
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section class="prediction-panel hidden" id="prediction-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">PREVISÃO · PRESIDENTE DA REPÚBLICA</p>
+            <h2>Lula × Flávio Bolsonaro</h2>
+          </div>
+          <span class="prediction-badge">Estimativa</span>
+        </div>
+        <p class="prediction-note">Projeção baseada na interseção de UFs entre 2022 e 2026. Onde o TSE já apurou, usa o resultado real de 2026. Onde ainda não apurou, projeta usando os votos de 2022 (Lula→Lula, Jair→Flávio).</p>
+
+        <div class="prediction-duel">
+          <article class="prediction-card prediction-lula">
+            <span class="prediction-candidate-label">Lula</span>
+            <strong class="prediction-percent" id="pred-lula-pct">—</strong>
+            <span class="prediction-votes" id="pred-lula-votes"></span>
+          </article>
+          <span class="prediction-vs">×</span>
+          <article class="prediction-card prediction-flavio">
+            <span class="prediction-candidate-label">Flávio Bolsonaro</span>
+            <strong class="prediction-percent" id="pred-flavio-pct">—</strong>
+            <span class="prediction-votes" id="pred-flavio-votes"></span>
+          </article>
+        </div>
+
+        <div class="prediction-bar-wrap">
+          <div class="prediction-bar-track">
+            <div class="prediction-bar-fill prediction-bar-lula" id="prediction-bar-lula" style="width:50%"></div>
+            <div class="prediction-bar-fill prediction-bar-flavio" id="prediction-bar-flavio" style="width:50%"></div>
+          </div>
+          <div class="prediction-bar-labels">
+            <span class="prediction-bar-label-lula">Lula</span>
+            <span class="prediction-bar-label-flavio">Flávio</span>
+          </div>
+        </div>
+
+        <div class="prediction-meta">
+          <span id="pred-intersection">— UFs na interseção</span>
+          <span>·</span>
+          <span id="pred-source-split">— com apuração 2026 · — projetadas de 2022</span>
+        </div>
+
+        <div class="table-wrap">
+          <table class="prediction-table">
+            <thead>
+              <tr><th>UF / Região</th><th class="numeric">Lula %</th><th class="numeric">Flávio %</th><th class="numeric">Fonte</th></tr>
+            </thead>
+            <tbody id="prediction-rows">
+              <tr><td colspan="4" class="empty-cell">Calculando previsão…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-footer" id="prediction-footer">Premissa: votos de Lula em 2022 migram para Lula 2026; votos de Jair Bolsonaro em 2022 migram para Flávio Bolsonaro 2026. Somente UFs presentes em ambas as eleições. Percentuais calculados sobre os votos válidos de cada UF.</div>
       </section>
 
       <section class="results-panel">

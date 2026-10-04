@@ -22,6 +22,12 @@ const OFFICE_NAMES = {
   '0007': 'Deputado Estadual',
 };
 
+const PREDICTION = {
+  lula: { label: 'Lula', number2022: '13', number2026: '13' },
+  flavio: { label: 'Flávio Bolsonaro', number2022: '22', number2026: '22' },
+  round2022: '1',
+};
+
 const app = {
   view: 'geral',
   year: '2026',
@@ -51,6 +57,9 @@ const elements = Object.fromEntries([
   'progress-fill', 'progress-foot', 'electorate-count', 'electorate-foot', 'results-title',
   'order-note', 'candidate-rows', 'table-footer', 'states-panel', 'states-grid',
   'foreign-panel', 'foreign-note', 'country-rows', 'all-countries-button',
+  'prediction-panel', 'pred-lula-pct', 'pred-lula-votes', 'pred-flavio-pct', 'pred-flavio-votes',
+  'prediction-bar-lula', 'prediction-bar-flavio', 'pred-intersection', 'pred-source-split',
+  'prediction-rows', 'prediction-footer',
 ].map((id) => [id, document.getElementById(id)]));
 
 const numberFormat = new Intl.NumberFormat('pt-BR');
@@ -243,6 +252,172 @@ function aggregateLiveResults(results) {
   };
 }
 
+function findCandidateVotes(candidates, number) {
+  for (const c of candidates || []) {
+    if (String(c.number) === String(number)) return c.votes || 0;
+  }
+  return 0;
+}
+
+async function computeNationalPrediction() {
+  const round = PREDICTION.round2022;
+  const records = app.historical?.records || [];
+
+  // 1. Agregar 2022 por UF
+  const byUf2022 = new Map();
+  for (const record of records) {
+    const roundData = record.rounds?.[round];
+    if (!roundData) continue;
+    const entry = byUf2022.get(record.uf) || { validVotes: 0, lulaVotes: 0, flavioVotes: 0 };
+    entry.validVotes += Number(roundData.validVotes) || 0;
+    for (const c of roundData.candidates || []) {
+      if (String(c.number) === PREDICTION.lula.number2022) entry.lulaVotes += Number(c.votes) || 0;
+      if (String(c.number) === PREDICTION.flavio.number2022) entry.flavioVotes += Number(c.votes) || 0;
+    }
+    byUf2022.set(record.uf, entry);
+  }
+
+  // 2. Buscar 2026 por UF (27 estados + ZZ)
+  const ufs = [...Object.keys(STATES), 'ZZ'];
+  const responses = await Promise.allSettled(
+    ufs.map(async (uf) => ({ uf, result: await requestLiveResult({ uf }, '0001') }))
+  );
+
+  // 3. Cruzar: para cada UF, decidir se usa 2026 ou 2022
+  let totalValid = 0, totalLula = 0, totalFlavio = 0;
+  let used2026 = 0, used2022 = 0;
+  const tableRows = [];
+
+  for (const resp of responses) {
+    if (resp.status !== 'fulfilled') continue;
+    const { uf, result } = resp.value;
+    const hist = byUf2022.get(uf);
+    if (!hist) continue; // UF não existe em 2022 → fora da interseção
+
+    const isCounted = result.progress && result.progress.processedSections > 0;
+
+    let rowLula, rowFlavio, rowValid, rowSource;
+    if (isCounted) {
+      rowLula = findCandidateVotes(result.candidates, PREDICTION.lula.number2026);
+      rowFlavio = findCandidateVotes(result.candidates, PREDICTION.flavio.number2026);
+      rowValid = result.validVotes || 0;
+      rowSource = '2026';
+      used2026++;
+    } else {
+      rowLula = hist.lulaVotes;
+      rowFlavio = hist.flavioVotes;
+      rowValid = hist.validVotes;
+      rowSource = '2022';
+      used2022++;
+    }
+
+    totalValid += rowValid;
+    totalLula += rowLula;
+    totalFlavio += rowFlavio;
+
+    tableRows.push({
+      name: uf === 'ZZ' ? 'Exterior' : titleForUf(uf),
+      uf,
+      lulaVotes: rowLula,
+      flavioVotes: rowFlavio,
+      validVotes: rowValid,
+      lulaPercent: rowValid ? (rowLula / rowValid) * 100 : 0,
+      flavioPercent: rowValid ? (rowFlavio / rowValid) * 100 : 0,
+      source: rowSource,
+    });
+  }
+
+  tableRows.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+
+  return {
+    lula: {
+      label: PREDICTION.lula.label,
+      votes: totalLula,
+      percent: totalValid ? (totalLula / totalValid) * 100 : 0,
+    },
+    flavio: {
+      label: PREDICTION.flavio.label,
+      votes: totalFlavio,
+      percent: totalValid ? (totalFlavio / totalValid) * 100 : 0,
+    },
+    totalValidVotes: totalValid,
+    used2026,
+    used2022,
+    totalIntersection: used2026 + used2022,
+    tableRows,
+  };
+}
+
+function renderPrediction(prediction) {
+  if (!prediction) {
+    elements['pred-lula-pct'].textContent = '—';
+    elements['pred-lula-votes'].textContent = '';
+    elements['pred-flavio-pct'].textContent = '—';
+    elements['pred-flavio-votes'].textContent = '';
+    elements['prediction-bar-lula'].style.width = '50%';
+    elements['prediction-bar-flavio'].style.width = '50%';
+    elements['pred-intersection'].textContent = 'Sem dados suficientes';
+    elements['pred-source-split'].textContent = '';
+    elements['prediction-rows'].replaceChildren();
+    return;
+  }
+
+  // Números do duelo
+  elements['pred-lula-pct'].textContent = formatPercent(prediction.lula.percent);
+  elements['pred-lula-votes'].textContent = `${formatNumber(prediction.lula.votes)} votos`;
+  elements['pred-flavio-pct'].textContent = formatPercent(prediction.flavio.percent);
+  elements['pred-flavio-votes'].textContent = `${formatNumber(prediction.flavio.votes)} votos`;
+
+  // Barra proporcional (só Lula vs Flávio, ignora outros candidatos)
+  const sumPercent = prediction.lula.percent + prediction.flavio.percent;
+  const lulaWidth = sumPercent > 0 ? (prediction.lula.percent / sumPercent) * 100 : 50;
+  elements['prediction-bar-lula'].style.width = `${lulaWidth}%`;
+  elements['prediction-bar-flavio'].style.width = `${100 - lulaWidth}%`;
+
+  // Metadados
+  elements['pred-intersection'].textContent =
+    `${formatNumber(prediction.totalIntersection)} UFs na interseção 2022 ∩ 2026`;
+  elements['pred-source-split'].textContent =
+    `${formatNumber(prediction.used2026)} com apuração 2026 · ${formatNumber(prediction.used2022)} projetadas de 2022`;
+
+  // Tabela por UF
+  const tbody = elements['prediction-rows'];
+  tbody.replaceChildren();
+  for (const row of prediction.tableRows) {
+    const tr = document.createElement('tr');
+    if (row.source === '2022') tr.classList.add('pred-row-projected');
+
+    const nameCell = document.createElement('td');
+    nameCell.className = 'pred-cell-name';
+    nameCell.textContent = row.name;
+
+    const lulaCell = document.createElement('td');
+    lulaCell.className = 'numeric pred-cell-lula';
+    lulaCell.textContent = formatPercent(row.lulaPercent);
+
+    const flavioCell = document.createElement('td');
+    flavioCell.className = 'numeric pred-cell-flavio';
+    flavioCell.textContent = formatPercent(row.flavioPercent);
+
+    const sourceCell = document.createElement('td');
+    sourceCell.className = 'numeric';
+    const badge = document.createElement('span');
+    badge.className = row.source === '2026' ? 'source-badge source-real' : 'source-badge source-proj';
+    badge.textContent = row.source === '2026' ? '2026 ✓' : '2022 →';
+    sourceCell.append(badge);
+
+    tr.append(nameCell, lulaCell, flavioCell, sourceCell);
+    tbody.append(tr);
+  }
+}
+
+async function loadPrediction() {
+  setScopeHeading();
+  setSyncStatus('Calculando previsão…');
+  const prediction = await computeNationalPrediction();
+  renderPrediction(prediction);
+}
+
 function countriesForExterior() {
   return [...new Set(app.countryMap.map((location) => location.country).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b, 'pt-BR'));
@@ -428,14 +603,20 @@ function setActiveView(view) {
     button.classList.toggle('active', button.dataset.view === view);
   });
   const isSp = view === 'sao-paulo';
-  elements['year-field'].classList.toggle('hidden', isSp);
-  elements['round-field'].classList.toggle('hidden', isSp || app.year !== '2022');
+  const isPred = view === 'previsao';
+  elements['year-field'].classList.toggle('hidden', isSp || isPred);
+  elements['round-field'].classList.toggle('hidden', isSp || isPred || app.year !== '2022');
   elements['state-field'].classList.toggle('hidden', !['estado', 'cidade'].includes(view));
   elements['city-field'].classList.toggle('hidden', view !== 'cidade');
   elements['office-field'].classList.toggle('hidden', !isSp);
   elements['states-panel'].classList.toggle('hidden', view !== 'geral' || app.year !== '2026');
   elements['foreign-panel'].classList.toggle('hidden', view !== 'pais');
-  elements['filter-note'].textContent = isSp ? 'Resultados de 2026 para o estado de São Paulo' : 'Votação para Presidente da República';
+  elements['prediction-panel'].classList.toggle('hidden', !isPred);
+  document.getElementById('stats-grid').classList.toggle('hidden', isPred);
+  document.querySelector('.results-panel').classList.toggle('hidden', isPred);
+  elements['filter-note'].textContent = isPred
+    ? 'Projeção Lula × Flávio Bolsonaro baseada na interseção 2022 ∩ 2026'
+    : (isSp ? 'Resultados de 2026 para o estado de São Paulo' : 'Votação para Presidente da República');
   renderCountryRows(app.year);
   refreshResults();
 }
@@ -446,6 +627,7 @@ function setScopeHeading() {
     pais: ['EXTERIOR · PAÍSES', app.selectedCountry || 'Todos os países'],
     estado: ['ESTADO', titleForUf(app.uf)],
     cidade: ['CIDADE', selectedLocation()?.name || app.cityCode || 'Selecione uma cidade'],
+    previsao: ['PREVISÃO · PRESIDENTE', 'Lula × Flávio Bolsonaro'],
     'sao-paulo': ['SÃO PAULO · 2026', 'Resultados no estado de São Paulo'],
   };
   const [eyebrow, title] = names[app.view] || names.geral;
@@ -483,7 +665,7 @@ function renderCountryRows(sourceYear = app.year) {
   if (!countries.length) {
     const row = document.createElement('tr');
     const cell = document.createElement('td');
-    cell.colSpan = 4;
+    cell.colSpan = 6;
     cell.className = 'empty-cell';
     cell.textContent = 'Aguardando a lista de localidades internacionais do TSE.';
     row.append(cell);
@@ -513,6 +695,29 @@ function renderCountryRows(sourceYear = app.year) {
       }
     }
 
+    // Calcular Lula% e Flávio% para este país
+    let lulaPercent = '—';
+    let flavioPercent = '—';
+    if (sourceYear === '2022') {
+      const countryRecords = (app.historical?.records || []).filter((record) => record.uf === 'ZZ'
+        && locationCodes.has(normalizeLocationCode(record.municipalityCode)));
+      if (countryRecords.length) {
+        const agg = aggregateHistoric(countryRecords, app.round);
+        const lulaC = agg.candidates.find((c) => String(c.number) === PREDICTION.lula.number2022);
+        const flavioC = agg.candidates.find((c) => String(c.number) === PREDICTION.flavio.number2022);
+        if (lulaC) lulaPercent = formatPercent(lulaC.percent);
+        if (flavioC) flavioPercent = formatPercent(flavioC.percent);
+      }
+    } else {
+      const countryResult = aggregateLiveResults(resultsForCountry(country));
+      if (countryResult) {
+        const lulaC = countryResult.candidates.find((c) => String(c.number) === PREDICTION.lula.number2026);
+        const flavioC = countryResult.candidates.find((c) => String(c.number) === PREDICTION.flavio.number2026);
+        if (lulaC) lulaPercent = formatPercent(lulaC.percent);
+        if (flavioC) flavioPercent = formatPercent(flavioC.percent);
+      }
+    }
+
     const countryCell = document.createElement('td');
     const button = document.createElement('button');
     button.className = 'country-name-button';
@@ -530,7 +735,13 @@ function renderCountryRows(sourceYear = app.year) {
     const votesCell = document.createElement('td');
     votesCell.className = 'numeric';
     votesCell.textContent = votesText;
-    row.append(countryCell, locationsCell, progressCell, votesCell);
+    const lulaCell = document.createElement('td');
+    lulaCell.className = 'numeric country-lula';
+    lulaCell.textContent = lulaPercent;
+    const flavioCell = document.createElement('td');
+    flavioCell.className = 'numeric country-flavio';
+    flavioCell.textContent = flavioPercent;
+    row.append(countryCell, locationsCell, progressCell, votesCell, lulaCell, flavioCell);
     tbody.append(row);
   }
   elements['all-countries-button'].classList.toggle('hidden', app.view !== 'pais' || !app.selectedCountry);
@@ -719,7 +930,7 @@ async function loadLive() {
   }
 
   let scope;
-  if (app.view === 'geral') scope = { uf: 'BR' };
+  if (app.view === 'geral' || app.view === 'previsao') scope = { uf: 'BR' };
   else if (app.view === 'estado') scope = { uf: app.uf };
   else if (app.view === 'cidade') {
     const location = selectedLocation();
@@ -753,7 +964,8 @@ async function refreshResults() {
   setSyncStatus('Consultando dados do TSE…');
   updateYearControls();
   try {
-    if (app.view === 'sao-paulo') await loadLive();
+    if (app.view === 'previsao') await loadPrediction();
+    else if (app.view === 'sao-paulo') await loadLive();
     else if (sourceYear === '2022') await loadHistoric();
     else await loadLive();
     setSyncStatus(`Atualizado às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`, sourceYear === '2026');
