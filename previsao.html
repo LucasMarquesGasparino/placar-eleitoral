@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f4f5f1" />
+    <meta name="description" content="Previsão Lula × Flávio Bolsonaro cruzando 2022 com 2026 por UF." />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>Previsão — Lula × Flávio Bolsonaro</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./previsao.html" aria-label="Previsão, início">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span>previsão<span class="brand-dot">.</span></span>
+      </a>
+      <div class="topbar-right">
+        <span class="live-label"><span class="live-dot"></span><span id="prev-status">Conectando ao TSE</span></span>
+        <button class="refresh-button" id="prev-refresh" type="button" aria-label="Atualizar previsão">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 12-2L20 9M4 15l2.4 2a7 7 0 0 0 12-2"/></svg>
+          <span>Atualizar</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="intro-row">
+        <div>
+          <p class="eyebrow">PREVISÃO · PRESIDENTE DA REPÚBLICA</p>
+          <h1>Lula × Flávio Bolsonaro</h1>
+          <p class="intro-copy">Projeção baseada na interseção de UFs entre 2022 e 2026. Onde o TSE já apurou, usa o resultado real de 2026. Onde ainda não apurou, projeta usando os votos de 2022 (Lula→Lula, Jair→Flávio).</p>
+        </div>
+      </section>
+
+      <section class="prediction-panel" id="prediction-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">PREVISÃO · PRESIDENTE DA REPÚBLICA</p>
+            <h2>Lula × Flávio Bolsonaro</h2>
+          </div>
+          <span class="prediction-badge">Estimativa</span>
+        </div>
+        <p class="prediction-note">Para cada UF, as seções já apuradas em 2026 entram com votos reais e as seções restantes são projetadas com a proporção de 2022.</p>
+
+        <div class="prediction-duel">
+          <article class="prediction-card prediction-lula">
+            <span class="prediction-candidate-label">Lula</span>
+            <strong class="prediction-percent" id="pred-lula-pct">—</strong>
+            <span class="prediction-votes" id="pred-lula-votes"></span>
+            <span class="prediction-counted" id="pred-lula-counted"></span>
+          </article>
+          <span class="prediction-vs">×</span>
+          <article class="prediction-card prediction-flavio">
+            <span class="prediction-candidate-label">Flávio Bolsonaro</span>
+            <strong class="prediction-percent" id="pred-flavio-pct">—</strong>
+            <span class="prediction-votes" id="pred-flavio-votes"></span>
+            <span class="prediction-counted" id="pred-flavio-counted"></span>
+          </article>
+        </div>
+
+        <div class="prediction-bar-wrap">
+          <div class="prediction-bar-track">
+            <div class="prediction-bar-fill prediction-bar-lula" id="prediction-bar-lula" style="width:50%"></div>
+            <div class="prediction-bar-fill prediction-bar-flavio" id="prediction-bar-flavio" style="width:50%"></div>
+          </div>
+          <div class="prediction-bar-labels">
+            <span class="prediction-bar-label-lula">Lula</span>
+            <span class="prediction-bar-label-flavio">Flávio</span>
+          </div>
+        </div>
+
+        <div class="prediction-meta">
+          <span id="pred-intersection">— UFs na interseção</span>
+          <span>·</span>
+          <span id="pred-source-split">— com apuração 2026 · — projetadas de 2022</span>
+        </div>
+
+        <div class="table-wrap">
+          <table class="prediction-table">
+            <thead>
+              <tr><th>UF / Região</th><th class="numeric">Lula %</th><th class="numeric">Flávio %</th><th class="numeric">Urnas 2026 %</th><th class="numeric">Urnas 2022 %</th><th class="numeric">Fonte</th></tr>
+            </thead>
+            <tbody id="prediction-rows">
+              <tr><td colspan="6" class="empty-cell">Calculando previsão…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-footer" id="prediction-footer">Premissa: votos de Lula em 2022 migram para Lula 2026; votos de Jair Bolsonaro em 2022 migram para Flávio Bolsonaro 2026. Para cada UF, as seções já apuradas em 2026 entram com votos reais e as seções restantes são projetadas com a proporção de 2022. Percentuais sobre os votos válidos (reais + projetados) de cada UF.</div>
+      </section>
+
+      <footer class="page-footer">
+        <div class="footer-source"><span class="source-mark">TSE</span><span>Dados do Tribunal Superior Eleitoral</span></div>
+        <div class="footer-links"><a href="https://resultados.tse.jus.br/oficial/app/index.html" target="_blank" rel="noreferrer">Resultados oficiais ↗</a></div>
+        <p>Estimativa sujeita a atualização conforme a apuração avança.</p>
+      </footer>
+    </main>
+    <script src="./previsao.js" defer></script>
+  </body>
+</html>

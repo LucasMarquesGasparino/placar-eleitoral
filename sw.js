@@ -1,9 +1,11 @@
-const CACHE_NAME = 'placar-static-v4';
+const CACHE_NAME = 'placar-static-v5';
 const STATIC_ASSETS = [
   './',
   './index.html',
+  './previsao.html',
   './styles.css',
   './app.js',
+  './previsao.js',
   './manifest.webmanifest',
   './assets/favicon.svg',
   './data/2022-presidencia-cidades.json',

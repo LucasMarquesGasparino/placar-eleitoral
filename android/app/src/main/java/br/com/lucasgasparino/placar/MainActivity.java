@@ -2,6 +2,8 @@ package br.com.lucasgasparino.placar;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -82,7 +84,21 @@ public final class MainActivity extends Activity {
             }
         });
         setContentView(webView);
-        webView.loadUrl(APP_URL);
+        webView.loadUrl(startUrl());
+    }
+
+    private String startUrl() {
+        try {
+            ActivityInfo info = getPackageManager().getActivityInfo(
+                    getComponentName(), PackageManager.GET_META_DATA);
+            String page = info.metaData != null
+                    ? info.metaData.getString("com.placar.START_PAGE") : null;
+            if (page == null || page.isEmpty()) page = "index.html";
+            if (page.contains("..") || page.startsWith("/")) page = "index.html";
+            return "https://" + APP_HOST + "/assets/www/" + page;
+        } catch (Exception ignored) {
+            return APP_URL;
+        }
     }
 
     @Override

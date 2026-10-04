@@ -57,7 +57,8 @@ const elements = Object.fromEntries([
   'progress-fill', 'progress-foot', 'electorate-count', 'electorate-foot', 'results-title',
   'order-note', 'candidate-rows', 'table-footer', 'states-panel', 'states-grid',
   'foreign-panel', 'foreign-note', 'country-rows', 'all-countries-button',
-  'prediction-panel', 'pred-lula-pct', 'pred-lula-votes', 'pred-flavio-pct', 'pred-flavio-votes',
+  'prediction-panel', 'pred-lula-pct', 'pred-lula-votes', 'pred-lula-counted',
+  'pred-flavio-pct', 'pred-flavio-votes', 'pred-flavio-counted',
   'prediction-bar-lula', 'prediction-bar-flavio', 'pred-intersection', 'pred-source-split',
   'prediction-rows', 'prediction-footer',
 ].map((id) => [id, document.getElementById(id)]));
@@ -288,6 +289,7 @@ async function computeNationalPrediction() {
   // de 2022 (o resumo de 2022 não informa seções, então a projeção usa
   // a proporção de votos de 2022 aplicada sobre as seções faltantes de 2026)
   let totalValid = 0, totalLula = 0, totalFlavio = 0;
+  let countedLula = 0, countedFlavio = 0, countedValid = 0;
   let used2026 = 0, used2022 = 0, usedMixed = 0;
   let sectionsTotal = 0, sectionsCounted = 0;
   const tableRows = [];
@@ -334,6 +336,11 @@ async function computeNationalPrediction() {
     totalValid += rowValid;
     totalLula += rowLula;
     totalFlavio += rowFlavio;
+    if (rowSource === '2026' || rowSource === 'mista') {
+      countedLula += lula26;
+      countedFlavio += flavio26;
+      countedValid += valid26;
+    }
 
     tableRows.push({
       name: uf === 'ZZ' ? 'Exterior' : titleForUf(uf),
@@ -365,6 +372,11 @@ async function computeNationalPrediction() {
       percent: totalValid ? (totalFlavio / totalValid) * 100 : 0,
     },
     totalValidVotes: totalValid,
+    counted: {
+      lula: { votes: countedLula, percent: countedValid ? (countedLula / countedValid) * 100 : 0 },
+      flavio: { votes: countedFlavio, percent: countedValid ? (countedFlavio / countedValid) * 100 : 0 },
+      validVotes: countedValid,
+    },
     used2026,
     used2022,
     usedMixed,
@@ -377,12 +389,19 @@ async function computeNationalPrediction() {
   };
 }
 
+function countedLine(entry) {
+  if (!entry || !entry.votes) return 'Nada apurado em 2026 ainda';
+  return `${formatNumber(entry.votes)} votos · ${formatPercent(entry.percent)} só do apurado 2026`;
+}
+
 function renderPrediction(prediction) {
   if (!prediction) {
     elements['pred-lula-pct'].textContent = '—';
     elements['pred-lula-votes'].textContent = '';
+    elements['pred-lula-counted'].textContent = '';
     elements['pred-flavio-pct'].textContent = '—';
     elements['pred-flavio-votes'].textContent = '';
+    elements['pred-flavio-counted'].textContent = '';
     elements['prediction-bar-lula'].style.width = '50%';
     elements['prediction-bar-flavio'].style.width = '50%';
     elements['pred-intersection'].textContent = 'Sem dados suficientes';
@@ -394,8 +413,10 @@ function renderPrediction(prediction) {
   // Números do duelo
   elements['pred-lula-pct'].textContent = formatPercent(prediction.lula.percent);
   elements['pred-lula-votes'].textContent = `${formatNumber(prediction.lula.votes)} votos`;
+  elements['pred-lula-counted'].textContent = countedLine(prediction.counted.lula);
   elements['pred-flavio-pct'].textContent = formatPercent(prediction.flavio.percent);
   elements['pred-flavio-votes'].textContent = `${formatNumber(prediction.flavio.votes)} votos`;
+  elements['pred-flavio-counted'].textContent = countedLine(prediction.counted.flavio);
 
   // Barra proporcional (só Lula vs Flávio, ignora outros candidatos)
   const sumPercent = prediction.lula.percent + prediction.flavio.percent;
