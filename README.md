@@ -1,0 +1,35 @@
+# Placar Eleitoral
+
+Aplicativo web instalável para consultar resultados oficiais das eleições por Brasil, estado e cidade. A tela **Geral** mostra o quadro nacional e a totalização por estado. A aba **São Paulo · cargos estaduais** apresenta resultados de Governador, Senador, Deputado Federal e Deputado Estadual.
+
+Os registros de candidatos são exibidos em ordem de número de urna. As consultas mostram votos e percentual dos votos válidos; a tela geral também mostra seções totalizadas. O app atualiza automaticamente a cada cinco minutos e tem um botão de atualização manual. O total nacional do TSE inclui o exterior.
+
+## Executar no Termux
+
+```sh
+npm start
+```
+
+Abra `http://127.0.0.1:4173` no navegador. O app não usa dependências npm externas.
+
+## Dados
+
+- **2022:** resumo por município derivado do arquivo oficial [Votação por seção eleitoral — 2022](https://dadosabertos.tse.jus.br/dataset/resultados-2022). O JSON gerado mantém os votos por candidatura e turno para Presidente; a tela soma os municípios quando a consulta é por estado ou País.
+- **2026:** arquivos oficiais JSON da CDN do TSE para totalização consolidada. O código da eleição presidencial é 6257 e o dos cargos estaduais é 6259. As listas de municípios são obtidas da configuração de municípios publicada pelo TSE.
+- Fontes e regras técnicas: [Informações técnicas da divulgação de resultados 2026](https://www.tse.jus.br/eleicoes/informacoes-tecnicas-sobre-a-divulgacao-de-resultados) e [Resultados 2022 — Dados Abertos](https://dadosabertos.tse.jus.br/dataset/resultados-2022).
+
+### Regerar o resumo de 2022
+
+Baixe `votacao_secao_2022_BR.zip` do conjunto de dados do TSE e execute:
+
+```sh
+python3 scripts/build_2022_city_data.py /caminho/votacao_secao_2022_BR.zip
+```
+
+O script produz `data/2022-presidencia-cidades.json`. O arquivo bruto não deve ser incluído no repositório.
+
+## Observações
+
+- Durante a apuração, os arquivos oficiais podem ainda não existir para algumas abrangências; o app mostra esse estado e continua tentando na próxima sincronização.
+- O resumo histórico de 2022 não inclui eleitorado nem total de seções. O TSE fornece esses dados na divulgação em tempo real de 2026.
+- A listagem segue o número de urna, sem ordenação por votos.

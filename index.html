@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f4f5f1" />
+    <meta name="description" content="Resultados eleitorais oficiais por localidade, com dados do TSE." />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>Placar — Resultados eleitorais</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Placar, início">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span>placar<span class="brand-dot">.</span></span>
+      </a>
+      <div class="topbar-right">
+        <span class="live-label"><span class="live-dot"></span><span id="sync-label">Conectando ao TSE</span></span>
+        <button class="refresh-button" id="refresh-button" type="button" aria-label="Atualizar resultados">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 12-2L20 9M4 15l2.4 2a7 7 0 0 0 12-2"/></svg>
+          <span>Atualizar</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="intro-row">
+        <div>
+          <p class="eyebrow">DADOS OFICIAIS · TRIBUNAL SUPERIOR ELEITORAL</p>
+          <h1>Resultados, por localidade.</h1>
+          <p class="intro-copy">Consulte a votação e o andamento da totalização nos dados publicados pelo TSE.</p>
+        </div>
+        <div class="update-card" aria-live="polite">
+          <span class="update-icon" aria-hidden="true">↻</span>
+          <span><strong>Sincronização automática</strong><small>Próxima consulta em <b id="countdown">05:00</b></small></span>
+        </div>
+      </section>
+
+      <nav class="view-tabs" aria-label="Nível de consulta">
+        <button class="view-tab active" data-view="geral" type="button">Geral</button>
+        <button class="view-tab" data-view="pais" type="button">País</button>
+        <button class="view-tab" data-view="estado" type="button">Estado</button>
+        <button class="view-tab" data-view="cidade" type="button">Cidade</button>
+        <button class="view-tab sp-tab" data-view="sao-paulo" type="button"><span class="sp-spark">✳</span> São Paulo · cargos estaduais</button>
+      </nav>
+
+      <section class="filters-panel" aria-label="Filtros de consulta">
+        <div class="filter-field" id="year-field">
+          <label for="year-select">Eleição</label>
+          <select id="year-select">
+            <option value="2026">2026 · ao vivo</option>
+            <option value="2022">2022 · histórico</option>
+          </select>
+        </div>
+        <div class="filter-field" id="round-field">
+          <label for="round-select">Turno</label>
+          <select id="round-select">
+            <option value="1">1º turno</option>
+            <option value="2">2º turno</option>
+          </select>
+        </div>
+        <div class="filter-field location-filter" id="state-field">
+          <label for="state-select">Estado</label>
+          <select id="state-select"></select>
+        </div>
+        <div class="filter-field location-filter city-filter" id="city-field">
+          <label for="city-select">Cidade</label>
+          <select id="city-select"></select>
+        </div>
+        <div class="filter-field office-filter hidden" id="office-field">
+          <label for="office-select">Cargo em São Paulo</label>
+          <select id="office-select">
+            <option value="0003">Governador</option>
+            <option value="0005">Senador</option>
+            <option value="0006">Deputado Federal</option>
+            <option value="0007">Deputado Estadual</option>
+          </select>
+        </div>
+        <div class="filter-note" id="filter-note">Votos para Presidente da República</div>
+      </section>
+
+      <section id="error-banner" class="error-banner hidden" role="status"></section>
+
+      <section class="summary-heading">
+        <div>
+          <p class="eyebrow" id="scope-eyebrow">VISÃO GERAL</p>
+          <h2 id="scope-title">Brasil inteiro</h2>
+        </div>
+        <div class="partial-pill" id="partial-pill"><span></span><span id="partial-label">Aguardando dados oficiais</span></div>
+      </section>
+
+      <section class="stats-grid" id="stats-grid" aria-live="polite">
+        <article class="stat-card primary-stat">
+          <span class="stat-label">Votos válidos</span>
+          <strong class="stat-value" id="valid-votes">—</strong>
+          <span class="stat-foot" id="valid-foot">Total informado pelo TSE</span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label">Seções totalizadas</span>
+          <strong class="stat-value" id="sections-count">—</strong>
+          <span class="stat-foot" id="sections-foot">Seções contabilizadas pelo TSE</span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label">Progresso da totalização</span>
+          <strong class="stat-value" id="progress-value">—</strong>
+          <div class="progress-track"><span id="progress-fill"></span></div>
+          <span class="stat-foot" id="progress-foot">Seções totalizadas sobre o total previsto</span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label">Eleitorado das seções</span>
+          <strong class="stat-value" id="electorate-count">—</strong>
+          <span class="stat-foot" id="electorate-foot">Aptos nas seções totalizadas</span>
+        </article>
+      </section>
+
+      <section class="results-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">VOTAÇÃO REGISTRADA</p>
+            <h2 id="results-title">Candidaturas</h2>
+          </div>
+          <span class="order-note" id="order-note">Lista em ordem de número de urna</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Nº</th><th>Candidatura</th><th class="numeric">Votos</th><th class="numeric">% dos válidos</th></tr>
+            </thead>
+            <tbody id="candidate-rows">
+              <tr><td colspan="4" class="empty-cell">Carregando dados do TSE…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-footer" id="table-footer">Os dados parciais mudam conforme a Justiça Eleitoral recebe e totaliza os boletins.</div>
+      </section>
+
+      <section class="states-panel hidden" id="states-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">ANDAMENTO POR ESTADO</p><h2>Seções totalizadas</h2></div>
+          <span class="order-note">Ordem alfabética</span>
+        </div>
+        <div class="states-grid" id="states-grid"></div>
+      </section>
+
+      <footer class="page-footer">
+        <div class="footer-source"><span class="source-mark">TSE</span><span>Dados do Tribunal Superior Eleitoral</span></div>
+        <div class="footer-links"><a href="https://resultados.tse.jus.br/oficial/app/index.html" target="_blank" rel="noreferrer">Resultados oficiais ↗</a><a href="https://dadosabertos.tse.jus.br/dataset/resultados-2022" target="_blank" rel="noreferrer">Dados históricos 2022 ↗</a></div>
+        <p>Os resultados exibidos refletem os arquivos oficiais consultados. Durante a totalização, os números são parciais e sujeitos a atualização. O total nacional inclui os votos do exterior.</p>
+      </footer>
+    </main>
+    <script src="./app.js" defer></script>
+  </body>
+</html>

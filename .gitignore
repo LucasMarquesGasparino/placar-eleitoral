@@ -1,0 +1,12 @@
+node_modules/
+.DS_Store
+build/
+gen/
+bin/
+out/
+.gradle/
+*.apk
+*.keystore
+*.jks
+*.p12
+local.properties

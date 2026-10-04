@@ -1,0 +1,9 @@
+{
+  "name": "placar-eleitoral",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Consulta neutra de resultados eleitorais oficiais do TSE",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

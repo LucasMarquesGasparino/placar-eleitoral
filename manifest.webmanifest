@@ -1,0 +1,19 @@
+{
+  "name": "Placar — Resultados eleitorais",
+  "short_name": "Placar",
+  "description": "Resultados oficiais do TSE por localidade.",
+  "lang": "pt-BR",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f5f1",
+  "theme_color": "#f4f5f1",
+  "icons": [
+    {
+      "src": "./assets/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
