@@ -1,6 +1,6 @@
 # Placar Eleitoral
 
-Aplicativo web instalável para consultar resultados oficiais das eleições por Brasil, país, estado e cidade. A tela **Geral** mostra o quadro nacional e a totalização por estado. A aba **Países** detalha as localidades internacionais por país. A aba **São Paulo · cargos estaduais** apresenta resultados de Governador, Senador, Deputado Federal e Deputado Estadual.
+Aplicativo web instalável para consultar resultados oficiais das eleições por Brasil, país, estado e cidade. A tela **Geral** mostra o quadro nacional e a totalização por estado. A aba **Países** detalha as localidades internacionais por país, com colunas de percentual de Lula e Flávio Bolsonaro. A aba **Previsão** cruza 2022 com 2026 por UF (onde o TSE já apurou usa 2026, onde não projeta com 2022: Lula→Lula, Jair→Flávio). A aba **São Paulo · cargos estaduais** apresenta resultados de Governador, Senador, Deputado Federal e Deputado Estadual.
 
 Os registros de candidatos são exibidos em ordem de número de urna. As consultas mostram votos e percentual dos votos válidos; a tela geral também mostra seções totalizadas. O app atualiza automaticamente a cada cinco minutos e tem um botão de atualização manual. O total nacional do TSE inclui o exterior.
 
