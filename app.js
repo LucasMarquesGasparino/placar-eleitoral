@@ -283,9 +283,13 @@ async function computeNationalPrediction() {
     ufs.map(async (uf) => ({ uf, result: await requestLiveResult({ uf }, '0001') }))
   );
 
-  // 3. Cruzar: para cada UF, decidir se usa 2026 ou 2022
+  // 3. Cruzar por SEÇÃO: para cada UF, as seções já apuradas em 2026
+  // entram com votos reais; as seções restantes são projetadas a partir
+  // de 2022 (o resumo de 2022 não informa seções, então a projeção usa
+  // a proporção de votos de 2022 aplicada sobre as seções faltantes de 2026)
   let totalValid = 0, totalLula = 0, totalFlavio = 0;
-  let used2026 = 0, used2022 = 0;
+  let used2026 = 0, used2022 = 0, usedMixed = 0;
+  let sectionsTotal = 0, sectionsCounted = 0;
   const tableRows = [];
 
   for (const resp of responses) {
@@ -294,21 +298,37 @@ async function computeNationalPrediction() {
     const hist = byUf2022.get(uf);
     if (!hist) continue; // UF não existe em 2022 → fora da interseção
 
-    const isCounted = result.progress && result.progress.processedSections > 0;
+    const total = Number(result.progress?.totalSections) || 0;
+    const counted = Math.min(Number(result.progress?.processedSections) || 0, total);
+    const lula26 = findCandidateVotes(result.candidates, PREDICTION.lula.number2026);
+    const flavio26 = findCandidateVotes(result.candidates, PREDICTION.flavio.number2026);
+    const valid26 = result.validVotes || 0;
 
-    let rowLula, rowFlavio, rowValid, rowSource;
-    if (isCounted) {
-      rowLula = findCandidateVotes(result.candidates, PREDICTION.lula.number2026);
-      rowFlavio = findCandidateVotes(result.candidates, PREDICTION.flavio.number2026);
-      rowValid = result.validVotes || 0;
-      rowSource = '2026';
-      used2026++;
+    let rowLula, rowFlavio, rowValid, rowSource, rowCountedPct;
+    if (total <= 0) {
+      // Sem total de seções no arquivo: decisão binária como antes
+      if (counted > 0) {
+        rowLula = lula26; rowFlavio = flavio26; rowValid = valid26;
+        rowSource = '2026'; rowCountedPct = 100; used2026++;
+      } else {
+        rowLula = hist.lulaVotes; rowFlavio = hist.flavioVotes; rowValid = hist.validVotes;
+        rowSource = '2022'; rowCountedPct = 0; used2022++;
+      }
+    } else if (counted <= 0) {
+      rowLula = hist.lulaVotes; rowFlavio = hist.flavioVotes; rowValid = hist.validVotes;
+      rowSource = '2022'; rowCountedPct = 0; used2022++;
+      sectionsTotal += total;
+    } else if (counted >= total) {
+      rowLula = lula26; rowFlavio = flavio26; rowValid = valid26;
+      rowSource = '2026'; rowCountedPct = 100; used2026++;
+      sectionsTotal += total; sectionsCounted += total;
     } else {
-      rowLula = hist.lulaVotes;
-      rowFlavio = hist.flavioVotes;
-      rowValid = hist.validVotes;
-      rowSource = '2022';
-      used2022++;
+      const remainingRatio = (total - counted) / total;
+      rowLula = lula26 + hist.lulaVotes * remainingRatio;
+      rowFlavio = flavio26 + hist.flavioVotes * remainingRatio;
+      rowValid = valid26 + hist.validVotes * remainingRatio;
+      rowSource = 'mista'; rowCountedPct = (counted / total) * 100; usedMixed++;
+      sectionsTotal += total; sectionsCounted += counted;
     }
 
     totalValid += rowValid;
@@ -324,10 +344,13 @@ async function computeNationalPrediction() {
       lulaPercent: rowValid ? (rowLula / rowValid) * 100 : 0,
       flavioPercent: rowValid ? (rowFlavio / rowValid) * 100 : 0,
       source: rowSource,
+      countedPct: rowCountedPct,
     });
   }
 
   tableRows.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+
+  const sectionsCountedPct = sectionsTotal ? (sectionsCounted / sectionsTotal) * 100 : 0;
 
   return {
     lula: {
@@ -343,7 +366,12 @@ async function computeNationalPrediction() {
     totalValidVotes: totalValid,
     used2026,
     used2022,
-    totalIntersection: used2026 + used2022,
+    usedMixed,
+    totalIntersection: used2026 + used2022 + usedMixed,
+    sectionsTotal,
+    sectionsCounted,
+    sectionsCountedPct,
+    sectionsProjectedPct: 100 - sectionsCountedPct,
     tableRows,
   };
 }
@@ -378,7 +406,7 @@ function renderPrediction(prediction) {
   elements['pred-intersection'].textContent =
     `${formatNumber(prediction.totalIntersection)} UFs na interseção 2022 ∩ 2026`;
   elements['pred-source-split'].textContent =
-    `${formatNumber(prediction.used2026)} com apuração 2026 · ${formatNumber(prediction.used2022)} projetadas de 2022`;
+    `${formatPercent(prediction.sectionsCountedPct)} das seções apuradas em 2026 (${formatNumber(prediction.sectionsCounted)} / ${formatNumber(prediction.sectionsTotal)}) · ${formatPercent(prediction.sectionsProjectedPct)} projetadas de 2022`;
 
   // Tabela por UF
   const tbody = elements['prediction-rows'];
@@ -402,8 +430,16 @@ function renderPrediction(prediction) {
     const sourceCell = document.createElement('td');
     sourceCell.className = 'numeric';
     const badge = document.createElement('span');
-    badge.className = row.source === '2026' ? 'source-badge source-real' : 'source-badge source-proj';
-    badge.textContent = row.source === '2026' ? '2026 ✓' : '2022 →';
+    if (row.source === '2026') {
+      badge.className = 'source-badge source-real';
+      badge.textContent = '2026 ✓';
+    } else if (row.source === 'mista') {
+      badge.className = 'source-badge source-mix';
+      badge.textContent = `Mista ${formatPercent(row.countedPct)}`;
+    } else {
+      badge.className = 'source-badge source-proj';
+      badge.textContent = '2022 →';
+    }
     sourceCell.append(badge);
 
     tr.append(nameCell, lulaCell, flavioCell, sourceCell);

@@ -170,6 +170,7 @@ td.numeric, th.numeric { text-align: right; font-variant-numeric: tabular-nums; 
 .source-badge { display: inline-block; padding: 3px 8px; border-radius: 6px; font-size: 9px; font-weight: 800; letter-spacing: .3px; }
 .source-real { background: #e2f1ef; color: var(--accent-dark); }
 .source-proj { background: #fff3d6; color: #9b6121; }
+.source-mix { background: #e8eaf6; color: #3f51b5; }
 
 /* Colunas de candidato na tabela de países */
 .country-lula { color: #c0392b; font-weight: 600; }
