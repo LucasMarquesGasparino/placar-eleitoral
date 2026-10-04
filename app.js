@@ -847,7 +847,9 @@ async function fetchForeignResults() {
 }
 
 function renderCandidateRows(result) {
-  const rows = result?.candidates || [];
+  const rows = [...(result?.candidates || [])];
+  // Na visão São Paulo, ordenar por votos (decrescente); nas demais, por número de urna.
+  if (app.view === 'sao-paulo') rows.sort((a, b) => (b.votes || 0) - (a.votes || 0));
   elements['candidate-rows'].replaceChildren();
   if (!rows.length) {
     const row = document.createElement('tr');
@@ -921,7 +923,9 @@ function renderResult(result, sourceYear = app.year) {
   setScopeHeading();
   const isSp = app.view === 'sao-paulo';
   elements['results-title'].textContent = isSp ? OFFICE_NAMES[app.office] : 'Presidente da República';
-  elements['order-note'].textContent = 'Lista em ordem de número de urna';
+  elements['order-note'].textContent = isSp
+    ? 'Lista em ordem de votos (maior primeiro)'
+    : 'Lista em ordem de número de urna';
   elements['table-footer'].textContent = result
     ? `Fonte: TSE. Percentuais sobre os votos válidos. ${result.generatedAt ? `Última geração do arquivo: ${result.generatedAt}.` : ''}`
     : 'Fonte: TSE. Os dados são consultados diretamente nos arquivos oficiais.';
