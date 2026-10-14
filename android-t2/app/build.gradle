@@ -1,0 +1,51 @@
+plugins {
+    id 'com.android.application'
+}
+
+def webRoot = rootProject.projectDir.parentFile
+
+def generatedWebAssets = layout.buildDirectory.dir('generated/webAssets')
+
+tasks.register('syncWebAssets', Copy) {
+    from(webRoot) {
+        include 't2.html', 't2.js', 't2.css', 't2-engine.js', 't2-state.js', 't2-fetchq.js', 't2-sim.js', 't2-tse.js', 'styles.css', 'manifest-t2.webmanifest'
+        include 'assets/**'
+        include 'data/t2/base-2026-1t.json', 'data/t2/prior-2022.json', 'data/t2/fallback-2022.json'
+        into 'www'
+    }
+    into generatedWebAssets
+}
+
+android {
+    namespace 'br.com.lucasgasparino.placar'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'br.com.lucasgasparino.placar.t2'
+        minSdk 23
+        targetSdk 34
+        versionCode 1
+        versionName '2T-1.0'
+        manifestPlaceholders = [appLabel: 'Placar 2T', startPage: 't2.html']
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main.assets.srcDir generatedWebAssets
+    }
+
+    buildTypes {
+        debug {}
+        release {
+            minifyEnabled false
+        }
+    }
+}
+
+tasks.named('preBuild').configure {
+    dependsOn tasks.named('syncWebAssets')
+}

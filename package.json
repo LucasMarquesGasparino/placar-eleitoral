@@ -4,6 +4,7 @@
   "private": true,
   "description": "Consulta neutra de resultados eleitorais oficiais do TSE",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test:t2": "node --test"
   }
 }

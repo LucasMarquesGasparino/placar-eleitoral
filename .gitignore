@@ -10,3 +10,9 @@ out/
 *.jks
 *.p12
 local.properties
+data/t2/dev/
+docs/t2-amostras/
+*.zip
+*.csv
+android-t2/app/build/
+android-t2/.gradle/

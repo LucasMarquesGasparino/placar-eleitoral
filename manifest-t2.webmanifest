@@ -1,0 +1,10 @@
+{
+  "name": "Placar Eleitoral 2T",
+  "short_name": "Placar 2T",
+  "lang": "pt-BR",
+  "start_url": "./t2.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f5f1",
+  "theme_color": "#f4f5f1"
+}
