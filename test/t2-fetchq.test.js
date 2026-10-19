@@ -67,3 +67,61 @@ test('negTtlMs por requisição: 404 pode ser repetido depois de um TTL curto', 
   assert.equal(d.cached, undefined);
   assert.equal(calls.length, 2);
 });
+
+test('timeout: requisição pendurada resolve error:timeout e libera o worker (relógio real)', async () => {
+  const fetchImpl = async (url) => {
+    if (url === 'lenta') return new Promise(() => {});
+    return { status: 200, json: async () => ({ ok: url }) };
+  };
+  const q = Q.createFetchQueue({ fetchImpl, timeoutMs: 50, maxRps: 1000, maxConcurrent: 1 });
+  const t0 = Date.now();
+  const r = await q.get('lenta');
+  assert.equal(r.status, 0); assert.equal(r.error, 'timeout');
+  assert.ok(Date.now() - t0 < 1000, 'demorou demais: ' + (Date.now() - t0) + ' ms');
+  const r2 = await q.get('rapida');
+  assert.equal(r2.status, 200); assert.deepEqual(r2.json, { ok: 'rapida' });
+  assert.equal(q.stats().timeouts, 1);
+});
+
+test('timeout na leitura do corpo: res.json que nunca resolve -> error:timeout', async () => {
+  const fetchImpl = async () => ({ status: 200, json: () => new Promise(() => {}) });
+  const q = Q.createFetchQueue({ fetchImpl, timeoutMs: 50, maxRps: 1000 });
+  const r = await q.get('x');
+  assert.equal(r.error, 'timeout');
+  assert.equal(q.stats().timeouts, 1);
+});
+
+test('AbortController: o signal passado ao fetch é abortado no timeout', async () => {
+  let sig = null;
+  const fetchImpl = async (url, opts) => { sig = opts.signal; return new Promise(() => {}); };
+  const q = Q.createFetchQueue({ fetchImpl, timeoutMs: 30, maxRps: 1000 });
+  const r = await q.get('x');
+  assert.equal(r.error, 'timeout');
+  assert.ok(sig, 'signal ausente');
+  assert.equal(sig.aborted, true);
+});
+
+test('deadline: requisição vencida não vai à rede e resolve error:expired', async () => {
+  const { q, calls, c } = mk(() => ({ status: 200, body: {} }), { maxRps: 1000 });
+  const r = await q.get('a', { deadline: c.now() - 1 });
+  assert.equal(r.status, 0); assert.equal(r.error, 'expired');
+  assert.equal(calls.length, 0);
+  assert.equal(q.stats().expired, 1);
+});
+
+test('overflow: fila cheia resolve na hora com error:overflow (1 em voo + 2 na fila)', async () => {
+  const fetchImpl = async () => new Promise(() => {});
+  const q = Q.createFetchQueue({ fetchImpl, maxQueue: 2, maxConcurrent: 1, timeoutMs: 30, maxRps: 1000 });
+  const p1 = q.get('a'); const p2 = q.get('b'); const p3 = q.get('c');
+  const r4 = await q.get('d');
+  assert.equal(r4.status, 0); assert.equal(r4.error, 'overflow');
+  assert.equal(q.stats().overflow, 1);
+  await Promise.all([p1, p2, p3]);
+});
+
+test('200 com JSON inválido -> {status:200, error:json}', async () => {
+  const fetchImpl = async () => ({ status: 200, json: async () => { throw new SyntaxError('json'); } });
+  const q = Q.createFetchQueue({ fetchImpl, maxRps: 1000 });
+  const r = await q.get('x');
+  assert.equal(r.status, 200); assert.equal(r.error, 'json');
+});

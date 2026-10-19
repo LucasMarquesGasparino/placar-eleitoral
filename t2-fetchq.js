@@ -1,6 +1,8 @@
 /* t2-fetchq.js — Fila de requisições "educada" para o CDN do TSE.
  * Regras do TSE (2026): máx. 100 req/s por IP; bloqueio de 10 min se estourar; MUITOS 404 também bloqueiam.
  * Esta fila garante: concorrência limitada, taxa máxima, cache negativo de 404, disjuntor de 404 e pausa global em 403/429.
+ * Robustez (2T-1.1): timeout por requisição (cabeçalhos + corpo), prazo por requisição (deadline),
+ * limite de fila (overflow) e nenhuma promessa que fique pendurada.
  * NÃO envia cabeçalhos condicionais (If-None-Match) à mão: no navegador isso dispara pré-voo CORS.
  * Use fetchOptions {cache:'no-cache'} e deixe o navegador revalidar por ETag sozinho.
  */
@@ -21,8 +23,12 @@
       breakerWindowMs: 30000, // ... dentro desta janela abrem o disjuntor
       breakerMs: 60000,       // tempo de disjuntor aberto
       pauseMs: 600000,        // pausa global após 403/429 (bloqueio de 10 min do TSE)
+      timeoutMs: 15000,       // tempo máximo de uma requisição (fetch + leitura do corpo)
+      maxQueue: 2000,         // máximo de itens esperando na fila
       now: function () { return Date.now(); },
-      sleep: function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+      sleep: function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); },
+      setTimer: function (fn, ms) { return setTimeout(fn, ms); },
+      clearTimer: function (h) { clearTimeout(h); }
     };
     for (var k in opts) if (opts[k] !== undefined) o[k] = opts[k];
 
@@ -30,7 +36,10 @@
     var neg = {};                 // url -> instante até o qual não repetir
     var recent404 = [];           // instantes dos últimos 404
     var pausedUntil = 0, breakerUntil = 0, nextSlot = 0;
-    var stats = { started: 0, ok: 0, notFound: 0, blocked: 0, errors: 0, skipped: 0 };
+    var stats = {
+      started: 0, ok: 0, notFound: 0, blocked: 0, errors: 0, skipped: 0,
+      timeouts: 0, expired: 0, overflow: 0, lastOkAt: 0
+    };
 
     function pick() {                      // maior prioridade primeiro; empate: ordem de chegada
       var best = 0;
@@ -46,19 +55,38 @@
       if (t < pausedUntil) { stats.skipped++; return item.resolve({ status: 0, error: 'paused', retryAt: pausedUntil }); }
       if (t < breakerUntil) { stats.skipped++; return item.resolve({ status: 0, error: 'breaker', retryAt: breakerUntil }); }
       if (neg[url] && t < neg[url]) { stats.skipped++; return item.resolve({ status: 404, cached: true }); }
+      if (item.deadline && t > item.deadline) { stats.expired++; return item.resolve({ status: 0, error: 'expired' }); }
       var ttl = item.negTtlMs !== undefined ? item.negTtlMs : o.negTtlMs;
       var wait = nextSlot - t;               // limite de taxa
       nextSlot = Math.max(t, nextSlot) + 1000 / o.maxRps;
       if (wait > 0) await o.sleep(wait);
       t = o.now();
       if (t < pausedUntil) { stats.skipped++; return item.resolve({ status: 0, error: 'paused', retryAt: pausedUntil }); }
+      if (item.deadline && t > item.deadline) { stats.expired++; return item.resolve({ status: 0, error: 'expired' }); }
       stats.started++;
-      var res;
-      try { res = await o.fetchImpl(url, o.fetchOptions); }
-      catch (e) { stats.errors++; return item.resolve({ status: 0, error: 'network' }); }
+      var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+      var fo = {}; for (var k2 in o.fetchOptions) fo[k2] = o.fetchOptions[k2];
+      if (ctrl) fo.signal = ctrl.signal;
+      var TIMEOUT = {}; var th = null;
+      var timeoutP = new Promise(function (_, rej) { th = o.setTimer(function () { try { if (ctrl) ctrl.abort(); } catch (e) {} rej(TIMEOUT); }, o.timeoutMs); });
+      timeoutP.catch(function () {});
+      var res, json;
+      try {
+        res = await Promise.race([o.fetchImpl(url, fo), timeoutP]);
+        if (res.status === 200) {
+          try { json = await Promise.race([res.json(), timeoutP]); }
+          catch (eJ) { if (eJ === TIMEOUT) throw eJ; o.clearTimer(th); stats.errors++; return item.resolve({ status: 200, error: 'json' }); }
+        }
+      } catch (e) {
+        o.clearTimer(th);
+        if (e === TIMEOUT || (e && e.name === 'AbortError')) { stats.timeouts++; return item.resolve({ status: 0, error: 'timeout' }); }
+        stats.errors++; return item.resolve({ status: 0, error: 'network' });
+      }
+      o.clearTimer(th);
       if (res.status === 200) {
-        try { var json = await res.json(); stats.ok++; return item.resolve({ status: 200, json: json }); }
-        catch (e2) { stats.errors++; return item.resolve({ status: 200, error: 'json' }); }
+        if (json === null || json === undefined) { stats.errors++; return item.resolve({ status: 200, error: 'json' }); }
+        stats.ok++; stats.lastOkAt = o.now();
+        return item.resolve({ status: 200, json: json });
       }
       if (res.status === 404) {
         stats.notFound++;
@@ -78,21 +106,28 @@
     }
 
     async function worker() {
-      while (queue.length) { await handle(pick()); }
+      while (queue.length) {
+        var item = pick();
+        try { await handle(item); }
+        catch (e) { stats.errors++; item.resolve({ status: 0, error: 'network' }); }
+      }
     }
     function spawn() {
       while (workers < o.maxConcurrent && queue.length > workers) {
         workers++;
-        worker().then(function () { workers--; if (queue.length) spawn(); });
+        worker().catch(function () {}).then(function () { workers--; if (queue.length) spawn(); });
       }
     }
 
     return {
-      /* get(url, {priority, negTtlMs}) -> Promise<{status, json?, error?, cached?, retryAt?}>. Nunca rejeita.
-       * negTtlMs (opcional) troca, só para esta URL, o tempo em que um 404 não é repetido. */
+      /* get(url, {priority, negTtlMs, deadline}) -> Promise<{status, json?, error?, cached?, retryAt?}>. Nunca rejeita.
+       * negTtlMs (opcional) troca, só para esta URL, o tempo em que um 404 não é repetido.
+       * deadline (opcional, ms no relógio o.now()): se a requisição ainda não começou depois disso, resolve 'expired'.
+       * Fila cheia (queue >= maxQueue): resolve na hora 'overflow', sem enfileirar. */
       get: function (url, opt) {
         return new Promise(function (resolve) {
-          queue.push({ url: url, priority: (opt && opt.priority) || 0, negTtlMs: opt && opt.negTtlMs, seq: seq++, resolve: resolve });
+          if (queue.length >= o.maxQueue) { stats.overflow++; return resolve({ status: 0, error: 'overflow' }); }
+          queue.push({ url: url, priority: (opt && opt.priority) || 0, negTtlMs: opt && opt.negTtlMs, deadline: opt && opt.deadline, seq: seq++, resolve: resolve });
           spawn();
         });
       },
