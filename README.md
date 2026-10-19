@@ -47,3 +47,14 @@ O script produz `data/2022-presidencia-cidades.json`. O arquivo bruto não deve 
 - Durante a apuração, os arquivos oficiais podem ainda não existir para algumas abrangências; o app mostra esse estado e continua tentando na próxima sincronização.
 - O resumo histórico de 2022 não inclui eleitorado nem total de seções. O TSE fornece esses dados na divulgação em tempo real de 2026.
 - A listagem segue o número de urna, sem ordenação por votos.
+
+## APK do 2º turno (Placar 2T)
+
+O app do 2º turno fica em `t2.html` e `android-t2/`. Para gerar o APK no Termux:
+
+1. SDK mínimo em `~/android-sdk`: instale o `commandlinetools` e depois rode `sdkmanager "platforms;android-34" "build-tools;34.0.0"`.
+2. Crie `android-t2/local.properties` com `sdk.dir=/data/data/com.termux/files/home/android-sdk` (não é versionado).
+3. Crie `~/.gradle/gradle.properties` com `android.aapt2FromMavenOverride=/data/data/com.termux/files/usr/bin/aapt2`.
+4. Rode `sh android-t2/build-t2.sh`. O script roda os testes, cria a chave se ela não existir, gera o APK assinado e copia para `android-t2/build/placar-2t.apk`.
+
+A chave de assinatura fica em `~/.android-keys/placar-t2.keystore` (fora do repositório). Faça backup dela: um APK assinado com outra chave não atualiza o instalado e exige desinstalar antes.
