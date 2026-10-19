@@ -4,14 +4,17 @@ const numberFormat = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }
 const percentFormat = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const clockFormat = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const elements = Object.fromEntries([
-  't2-status', 't2-status-pill', 't2-refresh', 't2-updated', 't2-alert', 't2-rehearsal-label',
+  't2-status', 't2-status-pill', 't2-refresh', 't2-updated', 't2-tse-time', 't2-alert', 't2-rehearsal-label',
+  't2-conn', 't2-conn-label', 't2-conn-detail',
   't2-phase-message', 't2-L-pct', 't2-L-votes', 't2-F-pct', 't2-F-votes', 't2-bar-L', 't2-bar-F',
   't2-lead', 't2-band', 't2-counted-state', 't2-progress', 't2-progress-bar', 't2-sections',
-  't2-now-pct', 't2-forneed', 't2-mode-toggle', 't2-migration', 't2-valid-1t', 't2-valid-2t',
+  't2-now-pct', 't2-lag-note', 't2-forneed', 't2-mode-toggle', 't2-migration', 't2-valid-1t', 't2-valid-2t',
   't2-valid-delta', 't2-ufs', 't2-municipal-panel', 't2-mun-title', 't2-municipal-rows',
   't2-mun-close', 't2-eleicao-status', 't2-election-form', 't2-eleicao-input', 't2-diag-migration',
   't2-diag-units', 't2-diag-updates', 't2-diag-poller', 't2-diag-queue', 't2-diag-official',
   't2-diag-errors', 't2-rehearsal',
+  't2-off-secpct', 't2-off-sections', 't2-off-progress-bar', 't2-off-L-pct', 't2-off-L-votes',
+  't2-off-F-pct', 't2-off-F-votes', 't2-off-bar-L', 't2-off-bar-F', 't2-off-lead', 't2-off-extra',
 ].map((id) => [id, document.getElementById(id)]));
 
 const app = {
@@ -22,15 +25,24 @@ const app = {
   poller: null,
   electionConfig: null,
   electionCode: '6258',
+  electionMismatch: '',     // código não encontrado em ele-c.json (só quando o arquivo foi lido)
+  electionNote: '',         // avisos do diagnóstico da eleição (não vão ao alerta)
   flowMode: false,
   lastOutput: null,
+  lastVersion: -1,
+  lastSavedVersion: -1,
+  lastCycleAt: 0,
   rehearsal: false,
   rehearsalTimer: null,
+  rehearsalStatus: null,
   savedStateBeforeRehearsal: null,
   rehearsalUnits: null,
   userInteracted: false,
   wakeLock: null,
   testOverride: false,
+  tickTimer: null,
+  refreshNote: false,       // "Atualizando…" enquanto o toque em Atualizar aguarda a próxima rodada
+  internalError: '',        // erro inesperado de renderização (só some com um toque em Atualizar)
 };
 
 function fmtInt(value) {
@@ -39,6 +51,11 @@ function fmtInt(value) {
 
 function fmtPct(value) {
   return `${percentFormat.format((Number(value) || 0) * 100)}%`;
+}
+
+/* Progresso: arredonda PARA BAIXO, para nunca mostrar 100,00% antes do fim. */
+function fmtPctFloor(value) {
+  return `${percentFormat.format(Math.floor((Number(value) || 0) * 10000) / 100)}%`;
 }
 
 function fmtPp(value) {
@@ -52,6 +69,20 @@ function fmtSignedInt(value) {
 
 function clampPercent(value) {
   return `${Math.max(0, Math.min(100, (Number(value) || 0) * 100))}%`;
+}
+
+function fmtClock(ts) {
+  const n = Number(ts);
+  return n > 0 ? `${clockFormat.format(new Date(n))}` : '—';
+}
+
+function fmtAge(ms) {
+  const total = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  if (total < 60) return `${total} s`;
+  const min = Math.floor(total / 60), sec = total % 60;
+  if (min < 60) return `${min} min ${sec} s`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return `${h} h ${String(m).padStart(2, '0')} min`;
 }
 
 function setText(element, value) {
@@ -68,20 +99,6 @@ function makeCell(row, value, className) {
 
 function electionName(code) {
   return code === '6258' ? 'presidencial do 2º turno' : `eleição ${code}`;
-}
-
-function statusText(phase, stale) {
-  if (stale) return 'APURAÇÃO · ATRASADO';
-  return ({
-    pre: 'PRÉVIA', waiting: 'AGUARDANDO TSE', live: 'APURAÇÃO', final: 'FINAL', error: 'ERRO DE DADOS', idle: 'PRÉVIA',
-  })[phase] || 'PRÉVIA';
-}
-
-function statusClass(phase, stale) {
-  if (stale || phase === 'error') return 'is-error';
-  if (phase === 'waiting') return 'is-waiting';
-  if (phase === 'final') return 'is-final';
-  return '';
 }
 
 function firstError(status) {
@@ -102,7 +119,50 @@ function formatCountdown(ms) {
   return days > 0 ? `${days}d ${pad(hours)}:${pad(minutes)}:${pad(seconds)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
 }
 
-function renderPhaseMessage(status, stale) {
+/* Status simulado do ensaio, ou o status real do poller. */
+function currentStatus() {
+  if (app.rehearsal) return app.rehearsalStatus || { phase: 'live', lastOkTs: Date.now(), errors: [] };
+  return app.poller ? app.poller.status() : { phase: 'idle', errors: [] };
+}
+
+function pillClass(c) {
+  if (c.level === 'bad') return 'is-error';
+  if (c.key === 'stale' || c.level === 'warn') return 'is-stale';
+  if (c.key === 'waiting') return 'is-waiting';
+  if (c.key === 'final') return 'is-final';
+  return '';
+}
+
+/* Detalhe da faixa de conexão (texto em pt-BR, montado a partir do estado). */
+function connDetail(c, status, now) {
+  const since = c.since || 0;
+  switch (c.key) {
+    case 'pre': {
+      const start = (status && status.startMs) || T2Tse.START_2T_UTC;
+      const remain = start - now;
+      return remain > 0
+        ? `A apuração começa às 17:00 (Brasília) · faltam ${formatCountdown(remain)}`
+        : 'Iniciando a consulta ao TSE';
+    }
+    case 'waiting': return 'O TSE ainda não publicou o resultado; nova consulta a cada 30 s.';
+    case 'connecting': return 'Consultando o TSE…';
+    case 'paused': return 'Consulta pausada (app em segundo plano).';
+    case 'live': return `TSE respondeu há ${fmtAge(now - since)}`;
+    case 'final': return `Apuração concluída · última consulta há ${fmtAge(now - since)}`;
+    case 'stale': return since
+      ? `Sem resposta do TSE há ${fmtAge(now - since)} · mostrando os últimos dados (${fmtClock(since)})`
+      : 'Sem resposta do TSE.';
+    case 'offline': return since
+      ? `Sem internet · mostrando os dados de ${fmtClock(since)}`
+      : 'Sem internet · mostrando a prévia salva no aparelho.';
+    case 'blocked': return `O TSE limitou os acessos · nova tentativa às ${fmtClock(c.retryAt)} (não force)`;
+    case 'error': return `Formato inesperado nos arquivos do TSE: ${firstError(status)}`;
+    case 'rehearsal': return 'Dados sintéticos — não são resultados';
+    default: return '';
+  }
+}
+
+function renderPhaseMessage(status, c) {
   const phase = status && status.phase;
   if (app.rehearsal) {
     setText(elements['t2-phase-message'], 'Ensaio sintético em andamento. Os valores não vêm do TSE.');
@@ -122,6 +182,7 @@ function renderPhaseMessage(status, stale) {
     const lastTs = app.lastOutput && app.lastOutput.diagnostics.lastUpdateTs;
     const ageSeconds = lastTs ? Math.max(0, Math.floor((Date.now() - lastTs) / 1000)) : null;
     const age = ageSeconds == null ? '' : ` Último dado recebido há ${fmtInt(ageSeconds)} s.`;
+    const stale = c.key === 'stale';
     setText(elements['t2-phase-message'], stale
       ? `Sem dado novo há mais de 3 minutos.${age} A projeção usa a última totalização disponível.`
       : `Apuração em andamento. Os votos restantes são projetados a partir das zonas já atualizadas.${age}`);
@@ -197,6 +258,7 @@ function renderMunicipalities(uf) {
   elements['t2-municipal-panel'].scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+/* Botões de UF: o clique é tratado por delegação em #t2-ufs (um único listener, ver bindEvents). */
 function renderUfs(out) {
   const body = elements['t2-ufs'];
   body.replaceChildren();
@@ -206,9 +268,9 @@ function renderUfs(out) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 't2-uf-button';
+    button.dataset.uf = uf;
     button.textContent = `${uf} · ${result.nome || uf}`;
     button.setAttribute('aria-label', `Ver os municípios de ${result.nome || uf}`);
-    button.addEventListener('click', () => renderMunicipalities(uf));
     nameCell.appendChild(button);
     row.appendChild(nameCell);
     makeCell(row, fmtPct(result.progressPct), 'numeric');
@@ -216,6 +278,63 @@ function renderUfs(out) {
     appendLeader(row, result);
     body.appendChild(row);
   });
+}
+
+/* Painel "Apuração oficial · TSE": seções e votos como o TSE publicou (nada é projetado aqui). */
+function rehearsalOfficial() {
+  const out = app.lastOutput;
+  if (!out) return null;
+  const c = out.br.counted;
+  return { y: [c.L, c.F, c.B, c.N, c.A], E: out.br.E, s: out.progress.sectionsTotal, st: out.progress.sectionsCounted };
+}
+
+function renderOfficial(status) {
+  const phase = status && status.phase;
+  const o = app.rehearsal ? rehearsalOfficial() : ((status && status.official) || null);
+  if (!o) {
+    setText(elements['t2-off-secpct'], '—');
+    setText(elements['t2-off-sections'], '—');
+    setText(elements['t2-off-L-pct'], '—');
+    setText(elements['t2-off-F-pct'], '—');
+    setText(elements['t2-off-L-votes'], '—');
+    setText(elements['t2-off-F-votes'], '—');
+    elements['t2-off-progress-bar'].style.width = '0%';
+    elements['t2-off-bar-L'].style.width = '50%';
+    elements['t2-off-bar-F'].style.width = '50%';
+    setText(elements['t2-off-lead'], (phase === 'pre' || phase === 'waiting' || !phase)
+      ? 'A apuração começa às 17:00 (horário de Brasília) de 25/10.'
+      : 'Aguardando o arquivo nacional do TSE.');
+    setText(elements['t2-off-extra'], '');
+    return;
+  }
+  const secPct = o.s > 0 ? o.st / o.s : 0;
+  setText(elements['t2-off-secpct'], fmtPctFloor(secPct));
+  setText(elements['t2-off-sections'], `${fmtInt(o.st)} de ${fmtInt(o.s)} seções`);
+  elements['t2-off-progress-bar'].style.width = clampPercent(secPct);
+  const L = Number(o.y[0]) || 0, F = Number(o.y[1]) || 0, B = Number(o.y[2]) || 0, N = Number(o.y[3]) || 0, A = Number(o.y[4]) || 0;
+  const valid = L + F;                                  // válidos no 2º turno = Lula + Flávio
+  if (valid > 0) {
+    setText(elements['t2-off-L-pct'], fmtPct(L / valid));
+    setText(elements['t2-off-F-pct'], fmtPct(F / valid));
+    setText(elements['t2-off-L-votes'], `${fmtInt(L)} votos`);
+    setText(elements['t2-off-F-votes'], `${fmtInt(F)} votos`);
+    elements['t2-off-bar-L'].style.width = clampPercent(L / valid);
+    elements['t2-off-bar-F'].style.width = clampPercent(F / valid);
+    setText(elements['t2-off-lead'], L === F
+      ? 'Empate nos votos apurados.'
+      : `${L > F ? 'Lula' : 'Flávio'} à frente por ${fmtInt(Math.abs(L - F))} votos (${fmtPp(Math.abs(L - F) / valid * 100)})`);
+  } else {
+    setText(elements['t2-off-L-pct'], '—');
+    setText(elements['t2-off-F-pct'], '—');
+    setText(elements['t2-off-L-votes'], '—');
+    setText(elements['t2-off-F-votes'], '—');
+    elements['t2-off-bar-L'].style.width = '50%';
+    elements['t2-off-bar-F'].style.width = '50%';
+    setText(elements['t2-off-lead'], 'Nenhum voto apurado ainda.');
+  }
+  let extra = `Brancos ${fmtInt(B)} · Nulos ${fmtInt(N)} · Abstenção ${fmtInt(A)}`;
+  if (o.E > 0) extra += ` · Comparecimento ${fmtPct((L + F + B + N) / (L + F + B + N + A))} dos apurados`;
+  setText(elements['t2-off-extra'], extra);
 }
 
 function renderDiagnostics(out, status) {
@@ -226,12 +345,7 @@ function renderDiagnostics(out, status) {
   setText(elements['t2-diag-migration'], `Migração: dados ${fmtPct(weight)} / prior 2022 ${fmtPct(1 - weight)}; ${migration.unitsUsed} unidades na estimativa.`);
   setText(elements['t2-diag-units'], `Unidades com dados: ${countedUnits}. Unidades desconhecidas: ${diagnostics.unknownUnits.length}. Fallback de 2022: ${diagnostics.fallback22Used.length}.`);
   setText(elements['t2-diag-updates'], `Atualizações: ${diagnostics.updates}; regressões: ${diagnostics.regressions}; atualizações inválidas: ${diagnostics.invalidUpdates}.`);
-  const abStates = status.abState || {};
-  const abSummary = Object.entries(abStates).reduce((counts, [, value]) => {
-    counts[value] = (counts[value] || 0) + 1;
-    return counts;
-  }, {});
-  setText(elements['t2-diag-poller'], `Poller: ${status.phase || 'idle'}; ciclos ${status.cycles || 0}; unidades consultadas ${status.fetched || 0}; EA15/varredura ${JSON.stringify(abSummary)}.`);
+  renderPollerDiag(status);
   setText(elements['t2-diag-queue'], `Fila: ${status.queue ? JSON.stringify(status.queue) : 'sem fila ativa'}.`);
   if (status.official && Array.isArray(status.official.y)) {
     const zoneSum = [out.br.counted.L, out.br.counted.F, out.br.counted.B, out.br.counted.N, out.br.counted.A];
@@ -240,43 +354,53 @@ function renderDiagnostics(out, status) {
   } else {
     setText(elements['t2-diag-official'], 'Oficial × soma das zonas: aguardando o EA20 do Brasil.');
   }
-  const errorList = (status.errors || []).slice(0, 5).map((error) => typeof error === 'string' ? error : firstError({ errors: [error] }));
-  if (app.electionMessage) errorList.unshift(app.electionMessage);
-  setText(elements['t2-diag-errors'], errorList.length ? `Avisos: ${errorList.join(' · ')}` : 'Sem erros ou avisos registrados.');
+  const notes = [app.electionMismatch, app.electionNote].filter(Boolean);
+  const errorList = (status.errors || []).slice(0, 5).map((error) => {
+    if (typeof error === 'string') return error;
+    const when = error.at ? `${fmtClock(error.at)} ` : '';
+    return `${when}${firstError({ errors: [error] })}`;
+  });
+  const all = notes.concat(errorList);
+  setText(elements['t2-diag-errors'], all.length ? `Avisos: ${all.join(' · ')}` : 'Sem erros ou avisos registrados.');
 }
 
-function render(out, status) {
+function renderPollerDiag(status) {
+  const s = status || {};
+  const abSummary = Object.values(s.abState || {}).reduce((counts, value) => {
+    counts[value] = (counts[value] || 0) + 1;
+    return counts;
+  }, {});
+  const lf = s.lastFailure;
+  setText(elements['t2-diag-poller'],
+    `Poller: ${s.phase || 'idle'}; ciclos ${s.cycles || 0}; unidades consultadas ${s.fetched || 0}; EA15/varredura ${JSON.stringify(abSummary)}; ` +
+    `falhas seguidas ${s.consecutiveFailures || 0}; última falha ${lf ? `${lf.kind} às ${fmtClock(lf.at)}` : '—'}; ` +
+    `próximo ciclo ${s.nextCycleAt ? fmtClock(s.nextCycleAt) : '—'}.`);
+}
+
+/* Render PESADO: tudo que depende da projeção. Só roda quando há um "out" novo (após recompute). */
+function renderData(out, status) {
   app.lastOutput = out;
-  const phase = status.phase || 'idle';
-  const lastTs = out.diagnostics.lastUpdateTs;
-  const stale = !app.rehearsal && phase === 'live' && lastTs > 0 && Date.now() - lastTs > 180000;
-  const currentStatus = statusText(phase, stale);
-  setText(elements['t2-status'], currentStatus);
-  setText(elements['t2-status-pill'], app.rehearsal ? 'ENSAIO' : currentStatus);
-  elements['t2-status-pill'].className = `prediction-badge t2-status-badge ${statusClass(phase, stale)}`;
-  const headerLive = elements['t2-status'].parentElement;
-  headerLive.classList.toggle('is-live', phase === 'live' && !stale);
-  headerLive.classList.toggle('is-stale', stale);
-  renderPhaseMessage(status, stale);
+  const br = out.br;
+  setText(elements['t2-L-pct'], fmtPct(br.finalShare.L));
+  setText(elements['t2-F-pct'], fmtPct(br.finalShare.F));
+  setText(elements['t2-L-votes'], fmtInt(br.final.L));
+  setText(elements['t2-F-votes'], fmtInt(br.final.F));
+  elements['t2-bar-L'].style.width = clampPercent(br.finalShare.L);
+  elements['t2-bar-F'].style.width = clampPercent(br.finalShare.F);
 
-  setText(elements['t2-updated'], lastTs ? `${clockFormat.format(new Date(lastTs))} (Brasília)` : '—');
-  setText(elements['t2-L-pct'], fmtPct(out.br.finalShare.L));
-  setText(elements['t2-F-pct'], fmtPct(out.br.finalShare.F));
-  setText(elements['t2-L-votes'], fmtInt(out.br.final.L));
-  setText(elements['t2-F-votes'], fmtInt(out.br.final.F));
-  elements['t2-bar-L'].style.width = clampPercent(out.br.finalShare.L);
-  elements['t2-bar-F'].style.width = clampPercent(out.br.finalShare.F);
-
-  if (out.br.leaderFinal) {
-    const leader = out.br.leaderFinal === 'L' ? 'Lula' : 'Flávio';
-    const pp = Math.abs(out.br.finalShare.L - out.br.finalShare.F) * 100;
-    setText(elements['t2-lead'], `${leader} à frente por ${fmtPp(pp)} (≈ ${fmtInt(Math.abs(out.br.margin.final))} votos)`);
+  let lead;
+  if (br.leaderFinal) {
+    const leader = br.leaderFinal === 'L' ? 'Lula' : 'Flávio';
+    const pp = Math.abs(br.finalShare.L - br.finalShare.F) * 100;
+    lead = `${leader} à frente por ${fmtPp(pp)} (≈ ${fmtInt(Math.abs(br.margin.final))} votos)`;
   } else {
-    setText(elements['t2-lead'], 'Empate técnico na projeção.');
+    lead = 'Empate técnico na projeção.';
   }
+  if (out.progress.unitsWithData === 0 && (status.phase || 'idle') !== 'pre') lead += ' — prévia: nenhuma zona lida ainda';
+  setText(elements['t2-lead'], lead);
   setText(elements['t2-band'], `Faixa entre métodos: Lula ${fmtPct(out.band.lo)}–${fmtPct(out.band.hi)} dos votos válidos (não é margem de erro).`);
 
-  setText(elements['t2-progress'], fmtPct(out.progress.electorateCountedPct));
+  setText(elements['t2-progress'], fmtPctFloor(out.progress.electorateCountedPct));
   elements['t2-progress-bar'].style.width = clampPercent(out.progress.electorateCountedPct);
   const sections = elements['t2-sections'];
   if (out.progress.sectionsTotal > 0) {
@@ -285,10 +409,26 @@ function render(out, status) {
   } else {
     sections.classList.add('hidden');
   }
-  const current = out.br.countedShare;
+  const current = br.countedShare;
   setText(elements['t2-now-pct'], current.valid > 0
     ? `Votos válidos apurados: Lula ${fmtPct(current.L)} · Flávio ${fmtPct(current.F)}`
     : 'Votos válidos apurados: —');
+
+  // Aviso quando o TSE já tem bem mais seções do que as zonas que o app leu.
+  const lag = elements['t2-lag-note'];
+  const off = status.official;
+  if (!app.rehearsal && off && off.s > 0) {
+    const secPct = off.st / off.s, zonePct = out.progress.electorateCountedPct;
+    if (secPct - zonePct > 0.02) {
+      setText(lag, `O TSE já tem ${fmtPctFloor(secPct)} das seções; a projeção ainda usa ${fmtPctFloor(zonePct)} do eleitorado (zonas sendo lidas).`);
+      lag.classList.remove('hidden');
+    } else {
+      lag.classList.add('hidden');
+    }
+  } else {
+    lag.classList.add('hidden');
+  }
+
   const need = out.forNeed;
   if (need) {
     const trailer = need.trailer === 'L' ? 'Lula' : 'Flávio';
@@ -303,32 +443,110 @@ function render(out, status) {
   renderMigration(out);
   renderUfs(out);
   renderDiagnostics(out, status);
+  renderOfficial(status);
+}
 
-  if (phase === 'error') {
-    elements['t2-alert'].textContent = `Não foi possível interpretar os dados: ${firstError(status) || 'verifique o diagnóstico e tente atualizar.'}`;
-    elements['t2-alert'].classList.remove('hidden');
-  } else if (app.electionMessage) {
-    elements['t2-alert'].textContent = app.electionMessage;
-    elements['t2-alert'].classList.remove('hidden');
-  } else {
-    elements['t2-alert'].classList.add('hidden');
+/* Render LEVE (1 vez por segundo): faixa de conexão, cabeçalho, horários, contagem regressiva, alertas. */
+function renderLive(status) {
+  const now = Date.now();
+  const c = app.rehearsal
+    ? { key: 'rehearsal', label: 'ENSAIO', level: 'info', since: 0, retryAt: 0 }
+    : T2Tse.connectionState(status, now, navigator.onLine);
+  elements['t2-conn'].className = `t2-conn is-${c.level}`;
+  setText(elements['t2-conn-label'], c.label);
+  setText(elements['t2-conn-detail'], app.refreshNote ? 'Atualizando…' : connDetail(c, status, now));
+  setText(elements['t2-status'], c.label);
+  setText(elements['t2-status-pill'], c.label);
+  elements['t2-status-pill'].className = `prediction-badge t2-status-badge ${pillClass(c)}`;
+  const header = elements['t2-status'].parentElement;
+  header.classList.toggle('is-live', c.key === 'live');
+  header.classList.toggle('is-stale', c.level === 'warn' || c.level === 'bad');
+  renderPhaseMessage(status, c);
+
+  const out = app.lastOutput;
+  const lastOk = status && status.lastOkTs;
+  const lastUp = out && out.diagnostics.lastUpdateTs;
+  setText(elements['t2-updated'], lastOk
+    ? `${fmtClock(lastOk)} (Brasília)`
+    : (lastUp ? `dados salvos de ${fmtClock(lastUp)}` : '—'));
+  const tse = status && status.official && status.official.tse;
+  setText(elements['t2-tse-time'], tse && tse.label ? `Totalização TSE: ${tse.label}` : '');
+  renderPollerDiag(status);
+  renderAlert(status, c);
+}
+
+function renderAlert(status, c) {
+  const box = elements['t2-alert'];
+  let msg = '';
+  if (app.internalError) msg = `Erro interno na tela: ${app.internalError}. Os últimos dados continuam visíveis; toque em Atualizar.`;
+  else if (c.key === 'error') msg = `Não foi possível interpretar os dados: ${firstError(status) || 'verifique o diagnóstico e tente atualizar.'}`;
+  else if (app.electionMismatch) msg = app.electionMismatch;
+  if (box.textContent !== msg) setText(box, msg);
+  box.classList.toggle('hidden', !msg);
+}
+
+/* Projeção recalculada só quando os dados mudam (versão do estado). */
+function recompute() {
+  const v = app.state.version();
+  if (app.lastOutput && v === app.lastVersion) return app.lastOutput;
+  try {
+    const out = app.state.compute();
+    app.lastOutput = out;
+    app.lastVersion = v;
+    return out;
+  } catch (e) {
+    showInternalError(e);
+    return app.lastOutput;
   }
+}
+
+function safe(fn) {
+  try { fn(); } catch (e) { showInternalError(e); }
+}
+
+function showInternalError(e) {
+  app.internalError = (e && e.message) ? String(e.message) : String(e);
+  try {
+    const box = elements['t2-alert'];
+    if (box) {
+      setText(box, `Erro interno na tela: ${app.internalError}. Os últimos dados continuam visíveis; toque em Atualizar.`);
+      box.classList.remove('hidden');
+    }
+  } catch (ignored) { /* a própria tela pode estar em estado ruim */ }
+}
+
+function refreshView() {
+  const out = recompute();
+  const st = currentStatus();
+  if (out) safe(() => renderData(out, st));
+  safe(() => renderLive(st));
 }
 
 function renderElectionCheck() {
   if (app.electionConfig) {
     const found = JSON.stringify(app.electionConfig).includes(String(app.electionCode));
-    app.electionMessage = found ? '' : `Código da eleição ${app.electionCode} não encontrado em ele-c.json.`;
+    app.electionMismatch = found ? '' : `Código da eleição ${app.electionCode} não encontrado em ele-c.json.`;
     setText(elements['t2-eleicao-status'], found
       ? `ele-c.json disponível; código ${app.electionCode} encontrado.`
-      : `${app.electionMessage} Você pode corrigir o código neste diagnóstico.`);
+      : `${app.electionMismatch} Você pode corrigir o código neste diagnóstico.`);
   } else {
-    app.electionMessage = `Não foi possível verificar ${electionName(app.electionCode)} em ele-c.json; a prévia continua disponível offline.`;
-    setText(elements['t2-eleicao-status'], app.electionMessage);
+    // ele-c.json não foi lido: só o diagnóstico mostra; o alerta fica para o que afeta os dados.
+    app.electionMismatch = '';
+    setText(elements['t2-eleicao-status'], `Não foi possível verificar ${electionName(app.electionCode)} em ele-c.json; a prévia continua disponível offline.`);
   }
-  if (app.electionMessage) elements['t2-alert'].classList.remove('hidden');
-  else elements['t2-alert'].classList.add('hidden');
   elements['t2-eleicao-input'].value = app.electionCode;
+}
+
+/* Salva o estado só quando ele mudou (e nunca durante o ensaio). */
+function saveState() {
+  if (app.rehearsal || !app.state) return;
+  const v = app.state.version();
+  if (v === app.lastSavedVersion) return;
+  try {
+    localStorage.setItem('t2.state.v1', JSON.stringify(app.state.exportState()));
+    localStorage.setItem('t2.state.election', app.electionCode);
+    app.lastSavedVersion = v;
+  } catch (error) { /* armazenamento pode estar desativado */ }
 }
 
 function startPoller() {
@@ -338,8 +556,7 @@ function startPoller() {
   app.testOverride = testParam === '0' && app.electionCode === '6257';
   const startMs = app.testOverride ? 0 : T2Tse.START_2T_UTC;
   if (testParam === '0' && !app.testOverride) {
-    app.electionMessage = 'A opção t2start=0 só libera o ensaio de rede com a eleição 6257.';
-    setText(elements['t2-diag-errors'], app.electionMessage);
+    app.electionNote = 'A opção t2start=0 só libera o ensaio de rede com a eleição 6257.';
   }
   const units = app.baseline.unidades.map((u) => ({ id: u.id, uf: u.uf, mun: u.mun, zona: u.zona, E: u.E }));
   app.poller = T2Tse.createPoller({
@@ -350,14 +567,14 @@ function startPoller() {
     startMs,
     onCycle: () => {
       if (app.testOverride && app.poller.status().cycles >= 3) app.poller.stop();
-      render(app.state.compute(), app.poller.status());
-      try {
-        localStorage.setItem('t2.state.v1', JSON.stringify(app.state.exportState()));
-        localStorage.setItem('t2.state.election', app.electionCode);
-      } catch (error) { /* armazenamento pode estar desativado */ }
+      app.lastCycleAt = Date.now();
+      app.refreshNote = false;
+      refreshView();
+      saveState();
     },
   });
-  render(app.state.compute(), app.poller.status());
+  try { app.poller.prime(app.state); } catch (error) { /* aquecer é opcional */ }
+  refreshView();
   app.poller.start();
 }
 
@@ -373,6 +590,7 @@ function stopRehearsal(restoreSavedState) {
   app.rehearsalTimer = null;
   app.rehearsal = false;
   app.rehearsalUnits = null;
+  app.rehearsalStatus = null;
   elements['t2-rehearsal-label'].classList.add('hidden');
   elements['t2-rehearsal'].textContent = 'Iniciar modo ensaio sintético';
   app.state.reset();
@@ -414,10 +632,12 @@ function startRehearsal() {
         });
       }
     });
-    const simulatedStatus = app.poller ? app.poller.status() : { phase: 'live', cycles: 0, errors: [], queue: app.queue.stats() };
-    simulatedStatus.phase = 'live';
-    simulatedStatus.errors = [];
-    render(app.state.compute(), simulatedStatus);
+    app.rehearsalStatus = {
+      phase: 'live', lastOkTs: Date.now(), errors: [], cycles: rehearsalStep, abState: {},
+      queue: app.queue.stats(), consecutiveFailures: 0, lastFailure: null, nextCycleAt: 0,
+      intervalMs: 30000, finalIntervalMs: 300000, startMs: 0, official: null,
+    };
+    refreshView();
     if (rehearsalStep >= 100) clearInterval(app.rehearsalTimer);
   };
   advance();
@@ -435,12 +655,52 @@ async function requestWakeLock() {
   }
 }
 
-function bindEvents() {
-  elements['t2-refresh'].addEventListener('click', () => {
-    if (app.rehearsal) stopRehearsal(false);
-    app.state.reset();
+function startTick() {
+  if (!app.tickTimer) app.tickTimer = setInterval(() => safe(() => renderLive(currentStatus())), 1000);
+}
+
+function stopTick() {
+  if (app.tickTimer) clearInterval(app.tickTimer);
+  app.tickTimer = null;
+}
+
+/* Atualizar: NUNCA apaga os dados nem a fila (respeita pausas do TSE). Desabilita o botão por 10 s. */
+function onRefreshClick() {
+  const btn = elements['t2-refresh'];
+  if (btn.disabled) return;
+  btn.disabled = true;
+  app.refreshNote = true;
+  app.internalError = '';
+  if (app.rehearsal) {
+    stopRehearsal(true);
     startPoller();
-  });
+  } else if (app.poller) {
+    app.poller.refresh();
+  } else {
+    startPoller();
+  }
+  safe(() => renderLive(currentStatus()));
+  setTimeout(() => {
+    btn.disabled = false;
+    app.refreshNote = false;
+    safe(() => renderLive(currentStatus()));
+  }, 10000);
+}
+
+function onVisibility() {
+  if (document.visibilityState === 'hidden') {
+    if (!app.rehearsal && app.poller) app.poller.stop();
+    stopTick();
+    return;
+  }
+  if (!app.rehearsal && app.poller) app.poller.start();
+  startTick();
+  safe(() => renderLive(currentStatus()));
+  if (app.userInteracted) requestWakeLock();
+}
+
+function bindEvents() {
+  elements['t2-refresh'].addEventListener('click', onRefreshClick);
   elements['t2-mode-toggle'].addEventListener('click', () => {
     app.flowMode = !app.flowMode;
     elements['t2-mode-toggle'].setAttribute('aria-pressed', String(app.flowMode));
@@ -448,14 +708,20 @@ function bindEvents() {
     if (app.lastOutput) renderMigration(app.lastOutput);
   });
   elements['t2-mun-close'].addEventListener('click', () => elements['t2-municipal-panel'].classList.add('hidden'));
+  elements['t2-ufs'].addEventListener('click', (event) => {
+    const target = event.target;
+    const button = target && target.closest ? target.closest('button[data-uf]') : null;
+    if (button) renderMunicipalities(button.dataset.uf);
+  });
   elements['t2-election-form'].addEventListener('submit', (event) => {
     event.preventDefault();
     const value = elements['t2-eleicao-input'].value.trim();
     if (!/^\d{1,6}$/.test(value) || Number(value) <= 0) {
-      app.electionMessage = 'O código da eleição deve conter de 1 a 6 dígitos.';
+      app.electionNote = 'O código da eleição deve conter de 1 a 6 dígitos.';
       renderElectionCheck();
       return;
     }
+    app.electionNote = '';
     const changedElection = value !== app.electionCode;
     app.electionCode = value;
     if (changedElection) app.state.reset();
@@ -471,9 +737,14 @@ function bindEvents() {
   });
   elements['t2-rehearsal'].addEventListener('click', startRehearsal);
   document.addEventListener('pointerdown', requestWakeLock, { once: true, passive: true });
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && app.userInteracted) requestWakeLock();
+  document.addEventListener('visibilitychange', onVisibility);
+  window.addEventListener('online', () => {
+    if (!app.rehearsal && app.poller) app.poller.refresh();
+    safe(() => renderLive(currentStatus()));
   });
+  window.addEventListener('offline', () => safe(() => renderLive(currentStatus())));
+  window.addEventListener('error', (event) => showInternalError(event.error || event.message));
+  window.addEventListener('unhandledrejection', (event) => showInternalError(event.reason));
 }
 
 async function init() {
@@ -502,16 +773,16 @@ async function init() {
   } catch (error) { /* estado salvo pode estar vazio ou corrompido */ }
   app.queue = T2FetchQ.createFetchQueue({ maxRps: 15, maxConcurrent: 6 });
   bindEvents();
-  await checkElectionCode();
-  startPoller();
-  setInterval(() => {
-    if (app.lastOutput && app.poller) render(app.lastOutput, app.poller.status());
-    else if (app.poller) renderPhaseMessage(app.poller.status(), false);
-  }, 1000);
+  startPoller();                              // primeiro render antes de qualquer rede
+  checkElectionCode().catch(() => {});        // o código da eleição não bloqueia a apuração
+  startTick();
 }
+
+globalThis.T2App = { app, renderData, renderLive, renderOfficial, refreshView, recompute, fmtPctFloor, fmtAge };
 
 init().catch((error) => {
   elements['t2-status'].textContent = 'ERRO DE DADOS';
+  elements['t2-conn-label'].textContent = 'ERRO DE DADOS';
   elements['t2-status-pill'].textContent = 'ERRO DE DADOS';
   elements['t2-status-pill'].classList.add('is-error');
   elements['t2-alert'].textContent = `Não foi possível carregar os dados locais da prévia: ${error.message}`;
