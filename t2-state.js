@@ -157,7 +157,14 @@
       return n;
     }
 
-    return { update: update, updateMany: updateMany, reset: reset, compute: compute, municipios: municipios, exportState: exportState, importState: importState, _units: units };
+    /* Situação de UMA unidade (usada pelo poller ao reabrir o app): null se não existe. */
+    function unitInfo(id) {
+      var u = units[id];
+      if (!u) return null;
+      return { st: u.st || 0, s: u.s || 0, hasData: !!u.y };
+    }
+
+    return { update: update, updateMany: updateMany, reset: reset, compute: compute, municipios: municipios, exportState: exportState, importState: importState, unitInfo: unitInfo, _units: units };
   }
 
   return { create: create, LABELS: LABELS, DST: DST };

@@ -72,9 +72,10 @@ function mockServer(w, tauRef, opts) {
   };
   return { fetchImpl, log };
 }
-function setup(opts, pollerCfg) {
+function setup(opts, pollerCfg, extra) {
   const x = mkWorld(), tau = { v: 0 }, srv = mockServer(x.w, tau, opts);
-  const q = Q.createFetchQueue({ fetchImpl: srv.fetchImpl, maxRps: 100000, maxConcurrent: 8, breaker404: 1000 });
+  const fi = extra && extra.wrap ? extra.wrap(srv.fetchImpl) : srv.fetchImpl;
+  const q = Q.createFetchQueue({ fetchImpl: fi, maxRps: 100000, maxConcurrent: 8, breaker404: 1000 });
   const state = St.create({ engine: E, baseline: x.baseline, prior: x.prior, opts: x.opts });
   const units = x.baseline.unidades.map((u) => ({ id: u.id, uf: u.uf, mun: u.mun, zona: u.zona, E: u.E }));
   const poller = T.createPoller(Object.assign({ q, urls, state, units, intervalMs: 1, budget: 400 }, pollerCfg));
@@ -169,4 +170,172 @@ test('404 passageiro: a unidade volta a ser buscada depois de 5 min e entra no e
   flaky = false; clock.t += 6 * 60 * 1000;
   await poller.cycle(); await poller.cycle();
   assert.ok(state.exportState().updates[target.id], 'deve ter sido buscada de novo');
+});
+
+// ---------- 2T-1.1: utilitários, falhas transitórias, backoff, estado de conexão ----------
+const unitUrlOf = (w, u) => {
+  const n = w.units.filter((x) => x.uf === u.uf && x.mun === u.mun).length;
+  return n === 1 ? urls.resMun(u.uf, u.mun) : urls.resZona(u.uf, u.mun, u.zona);
+};
+const sumSt = (upd) => Object.values(upd).reduce((a, x) => a + x.st, 0);
+
+test('toNum: separador de milhar; número simples; texto com vírgula não é número', () => {
+  assert.equal(T.toNum('1.234.567'), 1234567);
+  assert.equal(T.toNum('12'), 12);
+  assert.equal(T.toNum('47,03'), null);
+});
+
+test('candidates: caminho alternativo cai na busca profunda; parseResultado funciona com ele', () => {
+  const j = { carg: [{ cand: [{ n: '13', vap: '5' }, { n: '22', vap: '7' }] }] };
+  assert.equal(T.candidates(j).length, 2);
+  const j2 = { e: { te: '100', esi: '100', c: '80', a: '20' }, v: { vb: '1' }, s: { ts: '10', st: '5' },
+    carg: [{ cand: [{ n: '13', vap: '50' }, { n: '22', vap: '20' }] }] };
+  assert.deepEqual(T.parseResultado(j2, { L: '13', F: '22' }), { ok: true, y: [50, 20, 1, 9, 20], E: 100, s: 10, st: 5 });
+});
+
+test('parseTseTime: label com data e hora; sem campos -> label null', () => {
+  assert.equal(T.parseTseTime({ dt: '25/10/2026', ht: '19:42:10' }).label, '25/10/2026 19:42:10');
+  assert.equal(T.parseTseTime({}).label, null);
+});
+
+test('transitório após live: BR cai, o último dado é mantido e a fase continua live; volta sozinho', async () => {
+  const flaky = { on: false };
+  const s = setup({}, {}, { wrap: (fi) => async (url, o) => { if (flaky.on && url === urls.resBR) throw new Error('rede caiu'); return fi(url, o); } });
+  s.tau.v = 0.3;
+  await s.poller.cycle(); await s.poller.cycle();
+  assert.equal(s.poller.status().phase, 'live');
+  const before = sumSt(s.state.exportState().updates);
+  flaky.on = true;
+  const r = await s.poller.cycle();
+  assert.equal(r.transient, true);
+  assert.equal(s.poller.status().phase, 'live');
+  assert.equal(s.poller.status().consecutiveFailures, 1);
+  assert.equal(s.poller.status().lastFailure.kind, 'network');
+  assert.ok(sumSt(s.state.exportState().updates) >= before, 'o estado não pode diminuir');
+  flaky.on = false;
+  await s.poller.cycle();
+  assert.equal(s.poller.status().consecutiveFailures, 0);
+  assert.equal(s.poller.status().lastFailure, null);
+});
+
+test('BR 503 antes de qualquer dado: não vira erro (fase continua idle) e registra falha http', async () => {
+  const s = setup({}, {}, { wrap: (fi) => async (url, o) => (url === urls.resBR ? { status: 503, json: async () => null } : fi(url, o)) });
+  const r = await s.poller.cycle();
+  assert.equal(r.transient, true);
+  assert.equal(s.poller.status().phase, 'idle');
+  assert.equal(s.poller.status().lastFailure.kind, 'http');
+});
+
+test('BR 200 sem candidatos depois de um BR válido: mantém a apuração oficial anterior', async () => {
+  let broken = false;
+  const s = setup({}, {}, { wrap: (fi) => async (url, o) => {
+    if (broken && url === urls.resBR) return { status: 200, json: async () => ({ s: { ts: '10', st: '1' }, e: { te: '1', c: '1', a: '0' }, v: { vb: '0' } }) };
+    return fi(url, o);
+  } });
+  s.tau.v = 0.5;
+  await s.poller.cycle();
+  const y1 = s.poller.status().official.y;
+  assert.ok(y1);
+  broken = true;
+  await s.poller.cycle();
+  assert.deepEqual(s.poller.status().official.y, y1);
+  assert.ok(s.poller.status().errors.some((e) => e.id === 'BR'));
+});
+
+test('erros: 35 falhas transitórias do BR -> 30 registros, mais novo primeiro', async () => {
+  const s = setup({}, {}, { wrap: (fi) => async (url, o) => { if (url === urls.resBR) throw new Error('x'); return fi(url, o); } });
+  for (let i = 0; i < 35; i++) await s.poller.cycle();
+  const errs = s.poller.status().errors;
+  assert.equal(errs.length, 30);
+  assert.ok(errs[0].at >= errs[29].at);
+});
+
+test('ocupado: rodada concorrente devolve skipped; refresh com poller parado inicia; stop encerra', async () => {
+  const s = setup({}, {}, { wrap: (fi) => async (url, o) => { await new Promise((r) => setTimeout(r, 50)); return fi(url, o); } });
+  const p = s.poller.cycle();
+  const r2 = await s.poller.cycle();
+  assert.equal(r2.skipped, true);
+  assert.equal(s.poller.status().busy, true);
+  await p;
+  assert.equal(s.poller.status().busy, false);
+  assert.equal(s.poller.refresh(), true);
+  assert.equal(s.poller.status().running, true);
+  s.poller.stop();
+  assert.equal(s.poller.status().running, false);
+});
+
+test('justiça: com todo município "mudando" a cada ciclo, toda unidade não final é buscada (sem fome)', async () => {
+  let bump = 0;
+  const s = setup({}, { budget: 20 }, { wrap: (fi) => async (url, o) => {
+    const r = await fi(url, o);
+    if (/-ab\.json$/.test(url) && r.status === 200) {
+      const body = await r.json();
+      body.abr.forEach((it) => { it.s.st = String(1000 + bump); });
+      return { status: 200, json: async () => body };
+    }
+    return r;
+  } });
+  s.tau.v = 0.5;
+  const N = s.w.units.length;
+  for (let i = 0; i < Math.ceil(N / 20) + 3; i++) { bump++; await s.poller.cycle(); }
+  const requested = new Set(s.srv.log.filter((u) => /-u\.json$/.test(u) && !/br-c0001/.test(u)));
+  const nonFinal = s.w.units.filter((u) => Math.min(1, Math.max(0, (0.5 - u.t0) / u.dur)) < 1);
+  assert.ok(nonFinal.length > 0);
+  const faltam = nonFinal.filter((u) => !requested.has(unitUrlOf(s.w, u)));
+  assert.equal(faltam.length, 0, 'unidades nunca buscadas: ' + faltam.length + ' de ' + nonFinal.length);
+});
+
+test('em voo: unidade com fetch pendurado não é pedida de novo no ciclo seguinte', async () => {
+  let hangUrl = null, release = null, hangCount = 0;
+  const s = setup({}, { deadlineMs: 50 }, { wrap: (fi) => async (url, o) => {
+    if (url === hangUrl) { hangCount++; await new Promise((r) => { release = r; }); }
+    return fi(url, o);
+  } });
+  s.tau.v = 0.5;
+  const count = {};
+  s.w.units.forEach((u) => { const k = u.uf + '|' + u.mun; count[k] = (count[k] || 0) + 1; });
+  const target = s.w.units.filter((u) => count[u.uf + '|' + u.mun] === 1 && Math.min(1, Math.max(0, (0.5 - u.t0) / u.dur)) > 0)
+    .sort((a, b) => a.E - b.E)[0];
+  hangUrl = urls.resMun(target.uf, target.mun);
+  await s.poller.cycle();          // o fetch da unidade alvo fica pendurado; o ciclo termina pelo deadline
+  await s.poller.cycle();          // ela continua em voo: não pode ser pedida outra vez
+  assert.equal(hangCount, 1);
+  release();
+  await new Promise((r) => setTimeout(r, 20));
+  s.poller.stop();
+});
+
+test('prime: reabrir o app com estado completo não relê nenhuma unidade (só BR e EA15)', async () => {
+  const a = setup({});
+  a.tau.v = 1;
+  for (let i = 0; i < 10; i++) await a.poller.cycle();
+  const saved = JSON.parse(JSON.stringify(a.state.exportState()));
+  assert.equal(Object.keys(saved.updates).length, a.w.units.length);
+  const state = St.create({ engine: E, baseline: a.baseline, prior: a.prior, opts: a.opts });
+  assert.ok(state.importState(saved) > 0);
+  const srv = mockServer(a.w, a.tau, {});
+  const q = Q.createFetchQueue({ fetchImpl: srv.fetchImpl, maxRps: 100000, maxConcurrent: 8, breaker404: 1000 });
+  const units = a.baseline.unidades.map((u) => ({ id: u.id, uf: u.uf, mun: u.mun, zona: u.zona, E: u.E }));
+  const poller = T.createPoller({ q, urls, state, units, intervalMs: 1, budget: 400 });
+  assert.ok(poller.prime(state) > 0);
+  await poller.cycle();
+  const unitReqs = srv.log.filter((u) => /-u\.json$/.test(u) && !/br-c0001/.test(u));
+  assert.equal(unitReqs.length, 0, 'unidades pedidas: ' + unitReqs.length);
+  assert.ok(srv.log.includes(urls.resBR));
+});
+
+test('connectionState: um caso para cada chave', () => {
+  const now = 1e12;
+  const c = (s, online) => T.connectionState(s, now, online);
+  assert.equal(c({ phase: 'pre' }).key, 'pre');
+  assert.equal(c({ phase: 'live', queue: { pausedUntil: now + 1000 }, lastOkTs: now }).key, 'blocked');
+  assert.equal(c({ phase: 'live', lastOkTs: now }, false).key, 'offline');
+  assert.equal(c({ phase: 'live', lastOkTs: now, consecutiveFailures: 1, lastFailure: { kind: 'network', at: now } }).key, 'offline');
+  assert.equal(c({ phase: 'error' }).key, 'error');
+  assert.equal(c({ phase: 'waiting' }).key, 'waiting');
+  assert.equal(c({ phase: 'idle', running: true }).key, 'connecting');
+  assert.equal(c({ phase: 'idle' }).key, 'paused');
+  assert.equal(c({ phase: 'live', intervalMs: 30000, lastOkTs: now - 600000 }).key, 'stale');
+  assert.equal(c({ phase: 'final', finalIntervalMs: 300000, lastOkTs: now }).key, 'final');
+  assert.equal(c({ phase: 'live', intervalMs: 30000, lastOkTs: now }).key, 'live');
 });
