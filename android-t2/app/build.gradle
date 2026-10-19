@@ -6,7 +6,10 @@ def webRoot = rootProject.projectDir.parentFile
 
 def generatedWebAssets = layout.buildDirectory.dir('generated/webAssets')
 
-tasks.register('syncWebAssets', Copy) {
+// Chave estável FORA do repositório: APKs novos são assinados com a mesma chave (atualização sem desinstalar).
+def t2Keystore = new File(System.getProperty('user.home'), '.android-keys/placar-t2.keystore')
+
+tasks.register('syncWebAssets', Sync) {
     from(webRoot) {
         include 't2.html', 't2.js', 't2.css', 't2-engine.js', 't2-state.js', 't2-fetchq.js', 't2-sim.js', 't2-tse.js', 'styles.css', 'manifest-t2.webmanifest'
         include 'assets/**'
@@ -24,8 +27,8 @@ android {
         applicationId 'br.com.lucasgasparino.placar.t2'
         minSdk 23
         targetSdk 34
-        versionCode 1
-        versionName '2T-1.0'
+        versionCode 2
+        versionName '2T-1.1'
         manifestPlaceholders = [appLabel: 'Placar 2T', startPage: 't2.html']
     }
 
@@ -38,10 +41,22 @@ android {
         main.assets.srcDir generatedWebAssets
     }
 
+    signingConfigs {
+        placarT2 {
+            storeFile t2Keystore
+            storePassword 'placart2'
+            keyAlias 'placart2'
+            keyPassword 'placart2'
+        }
+    }
+
     buildTypes {
-        debug {}
+        debug {
+            if (t2Keystore.exists()) signingConfig signingConfigs.placarT2
+        }
         release {
             minifyEnabled false
+            if (t2Keystore.exists()) signingConfig signingConfigs.placarT2
         }
     }
 }

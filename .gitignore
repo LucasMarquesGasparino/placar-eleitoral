@@ -16,3 +16,4 @@ docs/t2-amostras/
 *.csv
 android-t2/app/build/
 android-t2/.gradle/
+android-t2/build/
