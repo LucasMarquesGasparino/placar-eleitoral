@@ -92,3 +92,42 @@ test('fallback de 2022: unidade desconhecida usa o 2T de 2022 da própria unidad
   near(ma.E, 2000, 1e-9); near(ma.final.L + ma.final.F + ma.final.B + ma.final.N + ma.final.A, 2000, 1e-6);
   assert.ok(ma.finalShare.L > mb.finalShare.L + 0.1, 'com fallback 2022 o Lula projetado deve ser bem maior: ' + ma.finalShare.L + ' vs ' + mb.finalShare.L);
 });
+
+test('export -> import em estado novo preserva o horário SALVO dos dados (diagnostics.lastUpdateTs)', () => {
+  const a = mkState(7), b = mkState(7);
+  const TS = 1234567890000;
+  S.stateAt(a.w, 0.3).forEach((u) => { if (u.y) a.st.update(u.id, { y: u.y, ts: TS }); });
+  const dump = JSON.parse(JSON.stringify(a.st.exportState()));
+  assert.equal(dump.lastUpdateTs, TS);
+  assert.ok(typeof dump.savedAt === 'number' && dump.savedAt > 0);
+  assert.ok(b.st.importState(dump) > 0);
+  assert.equal(b.st.compute().diagnostics.lastUpdateTs, TS);
+});
+
+test('version() sobe com update, reset e importState; não sobe com update inválido', () => {
+  const { st } = mkState(7);
+  const v0 = st.version();
+  assert.equal(st.update('U0|10000|0001', { y: [1, 2, NaN, 0, 0] }), false);
+  assert.equal(st.version(), v0);
+  st.update('U0|10000|0001', { y: [1, 2, 0, 0, 0] });
+  const v1 = st.version();
+  assert.ok(v1 > v0);
+  st.reset();
+  assert.ok(st.version() > v1);
+});
+
+test('importState com objeto incompleto retorna 0 sem lançar', () => {
+  const { st } = mkState(7);
+  assert.equal(st.importState({ v: 1 }), 0);
+  assert.equal(st.importState(null), 0);
+  assert.equal(st.importState({ v: 2, updates: {} }), 0);
+});
+
+test('unitInfo: null para unidade inexistente; situação da unidade', () => {
+  const { st } = mkState(7);
+  assert.equal(st.unitInfo('nao|existe|0001'), null);
+  const info = st.unitInfo('U0|10000|0001');
+  assert.ok(info && info.hasData === false && info.st === 0);
+  st.update('U0|10000|0001', { y: [1, 2, 0, 0, 0], s: 10, st: 4 });
+  assert.deepEqual(st.unitInfo('U0|10000|0001'), { st: 4, s: 10, hasData: true });
+});

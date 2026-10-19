@@ -27,6 +27,7 @@
     var units = {}, order = [];
     var diag = { unknownUnits: [], invalidUpdates: 0, regressions: 0, updates: 0, lastUpdateTs: 0, fallback22Used: [] };
     var last = null;
+    var version = 0;                     // sobe a cada mudança de dados (update, reset, importState): a tela recalcula só quando muda
 
     baseline.unidades.forEach(function (u) {
       var Eb = u.E > 0 ? u.E : sum(u.x);
@@ -51,10 +52,12 @@
       if (upd.s !== undefined && upd.s !== null) u.s = upd.s;
       if (upd.st !== undefined && upd.st !== null) u.st = upd.st;
       diag.updates++; diag.lastUpdateTs = upd.ts || Date.now();
+      version++;
       return true;
     }
     function updateMany(list) { var n = 0; list.forEach(function (r) { if (update(r.id, r)) n++; }); return n; }
-    function reset() { order.forEach(function (id) { units[id].y = null; units[id].E = units[id].Ebase; units[id].st = 0; }); last = null; }
+    function reset() { order.forEach(function (id) { units[id].y = null; units[id].E = units[id].Ebase; units[id].st = 0; }); last = null; version++; }
+    function versionOf() { return version; }
 
     function view(g) {
       var sc = Eng.validShares(g.counted), sf = Eng.validShares(g.final);
@@ -146,14 +149,17 @@
       }).sort(function (a, b) { return b.E - a.E; }).slice(0, limit || 20);
     }
 
+    /* lastUpdateTs = horário dos dados (não do salvamento); savedAt = quando foi gravado. */
     function exportState() {
-      var out = { v: 1, updates: {} };
+      var out = { v: 1, updates: {}, lastUpdateTs: diag.lastUpdateTs, savedAt: Date.now() };
       order.forEach(function (id) { var u = units[id]; if (u.y) out.updates[id] = { y: u.y, E: u.E, s: u.s, st: u.st }; });
       return out;
     }
     function importState(obj) {
-      if (!obj || obj.v !== 1) return 0;
+      if (!obj || obj.v !== 1 || !obj.updates || typeof obj.updates !== 'object') return 0;
       var n = 0; Object.keys(obj.updates).forEach(function (id) { if (update(id, obj.updates[id])) n++; });
+      diag.lastUpdateTs = Number(obj.lastUpdateTs) || 0;               // preserva o horário SALVO (nunca Date.now())
+      version++;
       return n;
     }
 
@@ -164,7 +170,7 @@
       return { st: u.st || 0, s: u.s || 0, hasData: !!u.y };
     }
 
-    return { update: update, updateMany: updateMany, reset: reset, compute: compute, municipios: municipios, exportState: exportState, importState: importState, unitInfo: unitInfo, _units: units };
+    return { update: update, updateMany: updateMany, reset: reset, version: versionOf, compute: compute, municipios: municipios, exportState: exportState, importState: importState, unitInfo: unitInfo, _units: units };
   }
 
   return { create: create, LABELS: LABELS, DST: DST };
