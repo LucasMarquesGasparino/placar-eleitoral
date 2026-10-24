@@ -17,3 +17,4 @@ docs/t2-amostras/
 android-t2/app/build/
 android-t2/.gradle/
 android-t2/build/
+__pycache__/

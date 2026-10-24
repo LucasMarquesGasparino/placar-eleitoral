@@ -5,6 +5,11 @@
  *
  * 2T-1.1 (robustez): falhas transitórias não derrubam a apuração (o último dado bom continua), backoff exponencial,
  * "atualizar agora", estado de conexão para a tela (connectionState) e aquecimento a partir do estado salvo (prime).
+ *
+ * 2T-1.2 (sem ponto único de falha): depois das 17:00 o arquivo nacional (BR) e o acompanhamento das UFs (EA15) são pedidos em paralelo,
+ * e uma falha do BR (rede, 5xx, timeout ou 404 depois do início) NÃO encerra o ciclo: segue com EA15 e zonas, contando st.brFailures e marcando
+ * st.officialStale. consecutiveFailures/backoff só contam ciclos em que NADA respondeu. O canário roda na primeira resposta válida de zona/EA15.
+ * BR parado por mais de 5 min enquanto as zonas avançam => st.officialFrozen = { since, label } (no 1T de 2026 ficou parado das 19:14 às 20:04).
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -152,20 +157,25 @@
     };
     for (var k in cfg) if (cfg[k] !== undefined) o[k] = cfg[k];
     var q = o.q, urls = o.urls, state = o.state;
-    var byMun = {}, ufs = [], seenUf = {};
+    var byMun = {}, ufs = [], seenUf = {}, ufE = {};
     o.units.forEach(function (u) {
       var key = u.uf + '|' + pad(u.mun, 5);
       (byMun[key] = byMun[key] || []).push(u);
-      if (!seenUf[u.uf]) { seenUf[u.uf] = true; ufs.push(u.uf); }
+      if (!seenUf[u.uf]) { seenUf[u.uf] = true; ufs.push(u.uf); ufE[u.uf] = 0; }
+      ufE[u.uf] += u.E || 0;
     });
     var lastSt = {}, lastFetch = {}, finalU = {}, brokenU = {}, abState = {}, inflight = {};
     var canaryOk = false, timer = null, stopped = true, busy = false, gen = 0;
+    var FROZEN_MS = 300000;      // BR sem mudar por mais de 5 min, enquanto as zonas avançam => congelado
+    var brFp = null, brChangedAt = 0, zonesAdvancedAt = 0;
+    var sentinel = ufs.slice().sort(function (a, b) { return ufE[b] - ufE[a]; })[0];   // UF maior: única consultada no EA15 antes de haver dados
     var RETRY_404_MS = 300000;   // unidade que deu 404 só volta a ser tentada depois de 5 min
     function isBroken(u) { return !!brokenU[u.id] && brokenU[u.id] > o.now(); }
     var st = {
       phase: 'idle', cycles: 0, official: null, officialTs: 0, fetched: 0, parseFailures: 0, notFound: 0, errors: [],
       lastCycleMs: 0, lastPicks: 0, mode: o.mode,
       lastOkTs: 0, lastContactTs: 0, lastAttemptTs: 0, consecutiveFailures: 0, lastFailure: null,
+      brFailures: 0, officialStale: false, officialFrozen: null,
       busy: false, running: false, nextCycleAt: 0, intervalMs: o.intervalMs, finalIntervalMs: o.finalIntervalMs, startMs: o.startMs
     };
 
@@ -184,6 +194,8 @@
       return summary;
     }
     function officialComplete() { return !!(st.official && st.official.s > 0 && st.official.st >= st.official.s); }
+    function allUnitsFinal() { for (var i = 0; i < o.units.length; i++) if (!finalU[o.units[i].id]) return false; return o.units.length > 0; }
+    function isComplete() { return officialComplete() || allUnitsFinal(); }   // sem BR, a conclusão vem das zonas
 
     async function fetchUnit(u, okIds, t0) {
       inflight[u.id] = true;
@@ -193,6 +205,8 @@
         if (r.status !== 200 || !r.json) { if (r.error !== 'expired') logErr({ id: u.id, erro: r.error || ('http ' + r.status) }); return; }
         var p = parseResultado(r.json, o.nums, o.mapRes);
         if (!p.ok) { st.parseFailures++; logErr({ id: u.id, erro: 'campos ausentes: ' + p.missing.join(',') }); return; }
+        var prev = state.unitInfo ? state.unitInfo(u.id) : null;
+        if (!prev || !prev.hasData || p.st > prev.st) zonesAdvancedAt = o.now();
         state.update(u.id, { y: p.y, E: p.E, s: p.s, st: p.st, ts: o.now() });
         lastFetch[u.id] = o.now(); st.fetched++; okIds[u.id] = true;
         if (p.s > 0 && p.st >= p.s) finalU[u.id] = true;
@@ -225,47 +239,84 @@
         .sort(function (a, b) { return b.score - a.score; }).slice(0, n).map(function (x) { return x.u; });
     }
 
+    /* Resposta do EA15 de uma UF com ao menos uma abrangência apurada? */
+    function abHasData(r) {
+      var list = (r && r.status === 200 && r.json) ? parseAcompanhamento(r.json, o.mapAb) : null;
+      return !!list && list.some(function (it) { return it.st > 0; });
+    }
+
     async function cycleInner() {
       var t0 = o.now();
       if (t0 < o.startMs) { st.phase = 'pre'; return { phase: 'pre' }; }
       st.lastAttemptTs = t0;
-      var br = await q.get(urls.resBR, { priority: 100, negTtlMs: 20000 });
-      if (br.status === 404) {
-        if (st.phase === 'live' || st.phase === 'final') {          // já tínhamos dados: 404 aqui é transitório
-          failure('http', 404); logErr({ id: 'BR', erro: '404 transitório' });
-          return emit({ phase: st.phase, transient: true });
+      var live = st.phase === 'live' || st.phase === 'final';          // já houve dados nesta sessão
+      var useAb = o.mode !== 'sweep';
+      // 1) BR e EA15 em paralelo. Antes de haver dados só a UF sentinela (poucos 404 enquanto o TSE não publica).
+      var abUfs = useAb ? (live ? ufs : [sentinel]) : [];
+      var brP = q.get(urls.resBR, { priority: 100, negTtlMs: 20000 });
+      var abP = abUfs.map(function (uf) { return q.get(urls.acUF(uf), live ? { priority: 60 } : { priority: 60, negTtlMs: 20000 }); });
+      var br = await brP;
+      var abRes = await Promise.all(abP);
+      var brOk = br.status === 200 && !!br.json;
+      var abAny = abRes.some(function (r) { return r.status === 200 && !!r.json; });
+      var abData = abRes.some(abHasData);
+      if (!live && !brOk && !abData) {
+        // Sem nenhum sinal de resultados. 404 do BR = aguardando; outra falha do BR é contada. Se nada respondeu, é falha de conexão.
+        if (br.status !== 404) { st.brFailures++; st.officialStale = true; logErr({ id: 'BR', erro: br.error || ('http ' + br.status) }); }
+        if (br.status === 404 || abAny) {
+          st.phase = 'waiting';
+          if (!br.cached) st.lastContactTs = o.now();
+          st.consecutiveFailures = 0; st.lastFailure = null;
+          return emit({ phase: 'waiting' });
         }
-        st.phase = 'waiting';
-        if (!br.cached) st.lastContactTs = o.now();
-        st.consecutiveFailures = 0; st.lastFailure = null;
-        return emit({ phase: 'waiting' });
-      }
-      if (br.status !== 200 || !br.json) {                          // falha transitória: mantém o último dado bom
         failure(kindOf(br), br.status);
-        logErr({ id: 'BR', erro: br.error || ('http ' + br.status) });
+        return emit({ phase: st.phase, transient: true });
+      }
+      // 2) BR: parte do painel oficial; falha NÃO encerra o ciclo
+      if (brOk) {
+        st.brFailures = 0; st.officialStale = false;
+        var pb = parseResultado(br.json, o.nums, o.mapRes);
+        if (pb.ok) {
+          var tse = parseTseTime(br.json), fp = [tse.label, pb.st, pb.y[0], pb.y[1]].join('|');
+          if (fp !== brFp) { brFp = fp; brChangedAt = o.now(); }
+          st.official = { y: pb.y, E: pb.E, s: pb.s, st: pb.st, tse: tse }; st.officialTs = o.now();
+        } else logErr({ id: 'BR', erro: 'campos ausentes: ' + pb.missing.join(',') });
+      } else {
+        st.brFailures++; st.officialStale = true;
+        logErr({ id: 'BR', erro: br.status === 404 ? '404 (arquivo nacional ausente)' : (br.error || ('http ' + br.status)) });
+      }
+      if (!brOk && !abAny) {                                            // nada respondeu: falha de conexão, mantém o último dado bom
+        failure(kindOf(br), br.status);
         return emit({ phase: st.phase, transient: true });
       }
       st.lastOkTs = st.lastContactTs = o.now();
       st.consecutiveFailures = 0; st.lastFailure = null;
-      var pb = parseResultado(br.json, o.nums, o.mapRes);
-      if (pb.ok) { st.official = { y: pb.y, E: pb.E, s: pb.s, st: pb.st, tse: parseTseTime(br.json) }; st.officialTs = o.now(); }
-      else logErr({ id: 'BR', erro: 'campos ausentes: ' + pb.missing.join(',') });
-      if (!canaryOk) {
+      // 3) canário: na primeira resposta válida do BR ou do EA15 com apuração
+      if (!canaryOk && (brOk || abData)) {
         var c = await canary(t0);
         if (!c.ok) {
           logErr({ id: 'canário', erro: c.motivo });
           if (c.fatal) { st.phase = 'error'; return emit({ phase: 'error', motivo: c.motivo }); }
-          st.phase = officialComplete() ? 'final' : 'live';           // o BR respondeu: não é falha de conexão
+          st.phase = isComplete() ? 'final' : 'live';                   // o TSE respondeu: não é falha de conexão
           return emit({ phase: st.phase, transient: true });
         }
         canaryOk = true;
       }
+      // 4) quais unidades buscar
       var picks = [], changed = {}, pending = {};
-      if (o.mode !== 'sweep') {
-        var rs = await Promise.all(ufs.map(function (uf) { return q.get(urls.acUF(uf), { priority: 60 }); }));
+      if (useAb) {
+        var rs = abRes;
+        if (abUfs.length < ufs.length) {                                // 1º ciclo com dados: pede as demais UFs
+          var rest = ufs.filter(function (uf) { return abUfs.indexOf(uf) < 0; });
+          var restRes = await Promise.all(rest.map(function (uf) { return q.get(urls.acUF(uf), { priority: 60 }); }));
+          var byUf = {};
+          abUfs.forEach(function (uf, i) { byUf[uf] = abRes[i]; });
+          rest.forEach(function (uf, i) { byUf[uf] = restRes[i]; });
+          abUfs = ufs; rs = ufs.map(function (uf) { return byUf[uf]; });
+        }
         var broken = [];
         rs.forEach(function (r, i) {
-          var uf = ufs[i], list = (r.status === 200 && r.json) ? parseAcompanhamento(r.json, o.mapAb) : null;
+          var uf = abUfs[i], list = (r.status === 200 && r.json) ? parseAcompanhamento(r.json, o.mapAb) : null;
           if (!list) { abState[uf] = 'varredura'; broken.push(uf); return; }
           abState[uf] = 'ea15';
           list.forEach(function (it) {
@@ -290,8 +341,11 @@
         var all = byMun[key].every(function (u) { return finalU[u.id] || okIds[u.id]; });
         if (all) lastSt[key] = pending[key];
       });
+      // 5) BR congelado: sem mudar há mais de 5 min enquanto as zonas ainda avançam depois da última mudança dele
+      st.officialFrozen = (brOk && brFp && o.now() - brChangedAt > FROZEN_MS && zonesAdvancedAt - brChangedAt > 60000)
+        ? { since: brChangedAt, label: st.official && st.official.tse ? st.official.tse.label : null } : null;
       st.cycles++; st.lastPicks = picks.length; st.lastCycleMs = o.now() - t0;
-      st.phase = officialComplete() ? 'final' : 'live';
+      st.phase = isComplete() ? 'final' : 'live';
       return emit({ phase: st.phase, picks: picks.length, fetched: st.fetched });
     }
 
@@ -386,6 +440,7 @@
         return cs('stale', 'ATRASADO', 'warn', { since: lastOk });
       }
       if (phase === 'final') return cs('final', 'FINAL', 'ok', { since: lastOk });
+      if ((s.brFailures || 0) >= 2 || s.officialFrozen) return cs('partial', 'AO VIVO (sem arquivo nacional)', 'warn', { since: lastOk });
       return cs('live', 'AO VIVO', 'ok', { since: lastOk });
     }
     return cs('paused', 'PAUSADO', 'info');

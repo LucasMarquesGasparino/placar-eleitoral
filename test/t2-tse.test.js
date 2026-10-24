@@ -106,10 +106,12 @@ test('antes das 17h: nenhuma requisição', async () => {
   assert.equal(r.phase, 'pre'); assert.equal(s.srv.log.length, 0);
 });
 
-test('aguardando o TSE publicar (BR 404): 1 requisição por ciclo, fase "waiting"', async () => {
+test('aguardando o TSE publicar (BR 404): só o BR e o EA15 de UMA UF (sentinela) por ciclo, fase "waiting"', async () => {
   const s = setup({ brDown: true });
   const r = await s.poller.cycle();
-  assert.equal(r.phase, 'waiting'); assert.equal(s.srv.log.length, 1);
+  assert.equal(r.phase, 'waiting'); assert.equal(s.srv.log.length, 2);
+  assert.ok(s.srv.log.includes(urls.resBR) && s.srv.log.some((u) => /-ab\.json$/.test(u)));
+  assert.equal(s.poller.status().consecutiveFailures, 0);
 });
 
 test('canário falha (URL de unidade 404): para, não inunda o TSE', async () => {
@@ -198,32 +200,101 @@ test('parseTseTime: label com data e hora; sem campos -> label null', () => {
   assert.equal(T.parseTseTime({}).label, null);
 });
 
-test('transitório após live: BR cai, o último dado é mantido e a fase continua live; volta sozinho', async () => {
+test('BR cai depois de live: o ciclo CONTINUA com EA15 e zonas, o estado avança, brFailures sobe e volta a 0 sozinho', async () => {
   const flaky = { on: false };
   const s = setup({}, {}, { wrap: (fi) => async (url, o) => { if (flaky.on && url === urls.resBR) throw new Error('rede caiu'); return fi(url, o); } });
   s.tau.v = 0.3;
   await s.poller.cycle(); await s.poller.cycle();
   assert.equal(s.poller.status().phase, 'live');
   const before = sumSt(s.state.exportState().updates);
-  flaky.on = true;
+  flaky.on = true; s.tau.v = 0.6;
   const r = await s.poller.cycle();
-  assert.equal(r.transient, true);
-  assert.equal(s.poller.status().phase, 'live');
-  assert.equal(s.poller.status().consecutiveFailures, 1);
-  assert.equal(s.poller.status().lastFailure.kind, 'network');
-  assert.ok(sumSt(s.state.exportState().updates) >= before, 'o estado não pode diminuir');
+  assert.notEqual(r.transient, true);
+  const stt = s.poller.status();
+  assert.equal(stt.phase, 'live');
+  assert.equal(stt.consecutiveFailures, 0, 'o backoff só conta ciclos em que nada respondeu');
+  assert.equal(stt.brFailures, 1); assert.equal(stt.officialStale, true);
+  assert.ok(stt.errors.some((e) => e.id === 'BR'));
+  assert.ok(sumSt(s.state.exportState().updates) > before, 'as zonas devem continuar avançando sem o arquivo nacional');
   flaky.on = false;
   await s.poller.cycle();
-  assert.equal(s.poller.status().consecutiveFailures, 0);
-  assert.equal(s.poller.status().lastFailure, null);
+  assert.equal(s.poller.status().brFailures, 0); assert.equal(s.poller.status().officialStale, false);
 });
 
-test('BR 503 antes de qualquer dado: não vira erro (fase continua idle) e registra falha http', async () => {
+test('BR em 503 a noite toda: zonas continuam atualizando, projeção chega à verdade, estado "partial"', async () => {
+  const s = setup({}, {}, { wrap: (fi) => async (url, o) => (url === urls.resBR ? { status: 503, json: async () => null } : fi(url, o)) });
+  for (let v = 0.1; v <= 1.0001; v += 0.1) { s.tau.v = v; await s.poller.cycle(); }
+  for (let i = 0; i < 3; i++) await s.poller.cycle();
+  const stt = s.poller.status();
+  assert.ok(stt.brFailures >= 2 && stt.officialStale && stt.official === null);
+  assert.equal(stt.consecutiveFailures, 0);
+  assert.equal(stt.phase, 'final', 'sem BR, a conclusão vem de todas as zonas completas');
+  const out = s.state.compute(), tr = S.truth(s.w);
+  assert.ok(Math.abs(out.br.counted.L - tr[0]) <= s.w.units.length);
+  const live = Object.assign({}, stt, { phase: 'live', lastOkTs: Date.now() });
+  assert.equal(T.connectionState(live, Date.now()).key, 'partial');
+  assert.equal(T.connectionState(live, Date.now()).label, 'AO VIVO (sem arquivo nacional)');
+});
+
+test('BR 404 mas EA15 já mostra apuração: o ciclo segue (não fica em "aguardando") e o canário roda pelo EA15', async () => {
+  const s = setup({}, {}, { wrap: (fi) => async (url, o) => (url === urls.resBR ? { status: 404, json: async () => null } : fi(url, o)) });
+  s.tau.v = 0.4;
+  await s.poller.cycle(); await s.poller.cycle();
+  assert.equal(s.poller.status().phase, 'live');
+  assert.ok(s.poller.status().fetched > 0);
+  assert.ok(Object.keys(s.state.exportState().updates).length > 0);
+});
+
+test('BR 503 antes de qualquer dado e EA15 sem apuração: fase "waiting", falha do BR contada, sem backoff', async () => {
   const s = setup({}, {}, { wrap: (fi) => async (url, o) => (url === urls.resBR ? { status: 503, json: async () => null } : fi(url, o)) });
   const r = await s.poller.cycle();
+  assert.equal(r.phase, 'waiting');
+  assert.equal(s.poller.status().brFailures, 1);
+  assert.equal(s.poller.status().consecutiveFailures, 0);
+});
+
+test('backoff só quando NADA responde: rede fora => consecutiveFailures sobe e o estado não é varrido', async () => {
+  const down = { on: false };
+  const s = setup({}, {}, { wrap: (fi) => async (url, o) => { if (down.on) throw new Error('sem rede'); return fi(url, o); } });
+  s.tau.v = 0.3;
+  await s.poller.cycle();
+  const before = s.srv.log.length;
+  down.on = true;
+  const r = await s.poller.cycle();
   assert.equal(r.transient, true);
-  assert.equal(s.poller.status().phase, 'idle');
-  assert.equal(s.poller.status().lastFailure.kind, 'http');
+  assert.equal(s.poller.status().consecutiveFailures, 1);
+  assert.equal(s.poller.status().lastFailure.kind, 'network');
+  assert.ok(s.srv.log.length >= before);                      // (o log do servidor falso não registra o que falhou na rede)
+  await s.poller.cycle();
+  assert.equal(s.poller.status().consecutiveFailures, 2);
+  assert.equal(s.poller.status().phase, 'live');
+  down.on = false;
+  await s.poller.cycle();
+  assert.equal(s.poller.status().consecutiveFailures, 0);
+});
+
+test('BR congelado (resposta idêntica) por mais de 5 min enquanto as zonas avançam => officialFrozen; descongela quando muda', async () => {
+  const clock = { t: Date.now() };
+  let frozenBody = null, freeze = false;
+  const s = setup({}, { now: () => clock.t }, { wrap: (fi) => async (url, o) => {
+    const r = await fi(url, o);
+    if (url === urls.resBR && r.status === 200) {
+      const body = await r.json();
+      if (!frozenBody) frozenBody = JSON.stringify(body);
+      return { status: 200, json: async () => (freeze ? JSON.parse(frozenBody) : body) };
+    }
+    return r;
+  } });
+  s.tau.v = 0.2; await s.poller.cycle();
+  assert.equal(s.poller.status().officialFrozen, null);
+  freeze = true;
+  for (let i = 0; i < 4; i++) { clock.t += 90000; s.tau.v += 0.1; await s.poller.cycle(); }
+  const fz = s.poller.status().officialFrozen;
+  assert.ok(fz && fz.since > 0, 'deveria sinalizar BR parado');
+  assert.ok(s.poller.status().brFailures === 0);
+  assert.equal(T.connectionState(Object.assign({}, s.poller.status(), { phase: 'live', lastOkTs: clock.t }), clock.t).key, 'partial');
+  freeze = false; clock.t += 90000; s.tau.v += 0.05; await s.poller.cycle();
+  assert.equal(s.poller.status().officialFrozen, null);
 });
 
 test('BR 200 sem candidatos depois de um BR válido: mantém a apuração oficial anterior', async () => {

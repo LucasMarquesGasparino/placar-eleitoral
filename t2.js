@@ -1,5 +1,19 @@
 'use strict';
 
+/* t2.js — tela do 2º turno (Placar 2T).
+ *
+ * PLUGIN OPCIONAL (2T-1.2). Se existir window.T2Plugin (carregado antes deste arquivo, ex.: t2s-plugin.js do app "Placar 2T Seção"):
+ *   T2Plugin.init({ state, fetchq, urls, cfg })  depois de criar o estado e o poller (e de novo se o poller for recriado, ex.: troca do
+ *                                                código da eleição). state = T2State (update/unitInfo/..., aceita xc), fetchq = fila T2FetchQ
+ *                                                do app (use-a para falar com o TSE), urls = T2Tse.makeUrls(...),
+ *                                                cfg = { baseline, units, electionCode, startMs }.
+ *   await T2Plugin.tick()                        uma vez a cada ciclo CONCLUÍDO do poller. Assíncrono, com try/catch e limite de 8 s; um
+ *                                                tick lento não acumula (se o anterior não terminou, o ciclo seguinte não chama de novo) e
+ *                                                nunca derruba o app nem bloqueia o render (roda depois do render do ciclo).
+ *   T2Plugin.status()                            texto curto mostrado nos diagnósticos.
+ * Sem T2Plugin nada muda. O plugin influencia a projeção só via state.update(id, { xc }) (ver t2-state.js).
+ */
+
 const numberFormat = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
 const percentFormat = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const clockFormat = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -12,7 +26,7 @@ const elements = Object.fromEntries([
   't2-valid-delta', 't2-ufs', 't2-municipal-panel', 't2-mun-title', 't2-municipal-rows',
   't2-mun-close', 't2-eleicao-status', 't2-election-form', 't2-eleicao-input', 't2-diag-migration',
   't2-diag-units', 't2-diag-updates', 't2-diag-poller', 't2-diag-queue', 't2-diag-official',
-  't2-diag-errors', 't2-rehearsal',
+  't2-diag-errors', 't2-rehearsal', 't2-diag-arrival', 't2-diag-plugin',
   't2-off-secpct', 't2-off-sections', 't2-off-progress-bar', 't2-off-L-pct', 't2-off-L-votes',
   't2-off-F-pct', 't2-off-F-votes', 't2-off-bar-L', 't2-off-bar-F', 't2-off-lead', 't2-off-extra',
 ].map((id) => [id, document.getElementById(id)]));
@@ -43,6 +57,11 @@ const app = {
   tickTimer: null,
   refreshNote: false,       // "Atualizando…" enquanto o toque em Atualizar aguarda a próxima rodada
   internalError: '',        // erro inesperado de renderização (só some com um toque em Atualizar)
+  curve: null,              // data/t2/curva-2026-1t.json (opcional)
+  curveNote: '',            // por que a curva não foi carregada
+  pluginBusy: false,
+  pluginTimeoutMs: 8000,    // limite de um tick do plugin
+  pluginError: '',
 };
 
 function fmtInt(value) {
@@ -148,6 +167,9 @@ function connDetail(c, status, now) {
     case 'connecting': return 'Consultando o TSE…';
     case 'paused': return 'Consulta pausada (app em segundo plano).';
     case 'live': return `TSE respondeu há ${fmtAge(now - since)}`;
+    case 'partial': return status && status.officialFrozen
+      ? `Arquivo nacional do TSE parado desde ${fmtClock(status.officialFrozen.since)}; a projeção segue pelas zonas · TSE respondeu há ${fmtAge(now - since)}`
+      : `Arquivo nacional do TSE indisponível (${(status && status.brFailures) || 0} falhas seguidas); a projeção segue pelas zonas · TSE respondeu há ${fmtAge(now - since)}`;
     case 'final': return `Apuração concluída · última consulta há ${fmtAge(now - since)}`;
     case 'stale': return since
       ? `Sem resposta do TSE há ${fmtAge(now - since)} · mostrando os últimos dados (${fmtClock(since)})`
@@ -303,7 +325,7 @@ function renderOfficial(status) {
     elements['t2-off-bar-F'].style.width = '50%';
     setText(elements['t2-off-lead'], (phase === 'pre' || phase === 'waiting' || !phase)
       ? 'A apuração começa às 17:00 (horário de Brasília) de 25/10.'
-      : 'Aguardando o arquivo nacional do TSE.');
+      : (status && status.officialStale ? 'Arquivo nacional do TSE indisponível; a projeção segue pelas zonas.' : 'Aguardando o arquivo nacional do TSE.'));
     setText(elements['t2-off-extra'], '');
     return;
   }
@@ -334,6 +356,8 @@ function renderOfficial(status) {
   }
   let extra = `Brancos ${fmtInt(B)} · Nulos ${fmtInt(N)} · Abstenção ${fmtInt(A)}`;
   if (o.E > 0) extra += ` · Comparecimento ${fmtPct((L + F + B + N) / (L + F + B + N + A))} dos apurados`;
+  if (!app.rehearsal && status && status.officialFrozen) extra += ` · Arquivo nacional do TSE parado desde ${fmtClock(status.officialFrozen.since)}`;
+  else if (!app.rehearsal && status && status.officialStale) extra += ` · Arquivo nacional indisponível agora; mostrando a leitura de ${fmtClock(status.officialTs)}`;
   setText(elements['t2-off-extra'], extra);
 }
 
@@ -346,6 +370,12 @@ function renderDiagnostics(out, status) {
   setText(elements['t2-diag-units'], `Unidades com dados: ${countedUnits}. Unidades desconhecidas: ${diagnostics.unknownUnits.length}. Fallback de 2022: ${diagnostics.fallback22Used.length}.`);
   setText(elements['t2-diag-updates'], `Atualizações: ${diagnostics.updates}; regressões: ${diagnostics.regressions}; atualizações inválidas: ${diagnostics.invalidUpdates}.`);
   renderPollerDiag(status);
+  const band = `Faixa entre métodos (cenário principal, sem ajuste local, só prior): Lula ${fmtPct(out.band.lo)}–${fmtPct(out.band.hi)} dos votos válidos (não é margem de erro).`;
+  const curveText = diagnostics.curveLoaded
+    ? `Curva de chegada: carregada (${fmtInt(diagnostics.curveUnits)} zonas), α=${diagnostics.arrivalAlpha}, aplicada em ${fmtInt(diagnostics.arrivalApplied)} zonas`
+    : `Curva de chegada: não carregada${diagnostics.curveNote || app.curveNote ? ` (${diagnostics.curveNote || app.curveNote})` : ''}`;
+  setText(elements['t2-diag-arrival'], `${curveText}; pertença exata em ${fmtInt(diagnostics.membershipApplied)} zonas. ${band}`);
+  setText(elements['t2-diag-plugin'], pluginStatusText());
   setText(elements['t2-diag-queue'], `Fila: ${status.queue ? JSON.stringify(status.queue) : 'sem fila ativa'}.`);
   if (status.official && Array.isArray(status.official.y)) {
     const zoneSum = [out.br.counted.L, out.br.counted.F, out.br.counted.B, out.br.counted.N, out.br.counted.A];
@@ -354,7 +384,7 @@ function renderDiagnostics(out, status) {
   } else {
     setText(elements['t2-diag-official'], 'Oficial × soma das zonas: aguardando o EA20 do Brasil.');
   }
-  const notes = [app.electionMismatch, app.electionNote].filter(Boolean);
+  const notes = [app.electionMismatch, app.electionNote, app.curveNote, app.pluginError].filter(Boolean);
   const errorList = (status.errors || []).slice(0, 5).map((error) => {
     if (typeof error === 'string') return error;
     const when = error.at ? `${fmtClock(error.at)} ` : '';
@@ -373,7 +403,7 @@ function renderPollerDiag(status) {
   const lf = s.lastFailure;
   setText(elements['t2-diag-poller'],
     `Poller: ${s.phase || 'idle'}; ciclos ${s.cycles || 0}; unidades consultadas ${s.fetched || 0}; EA15/varredura ${JSON.stringify(abSummary)}; ` +
-    `falhas seguidas ${s.consecutiveFailures || 0}; última falha ${lf ? `${lf.kind} às ${fmtClock(lf.at)}` : '—'}; ` +
+    `falhas seguidas ${s.consecutiveFailures || 0}; falhas do arquivo nacional ${s.brFailures || 0}${s.officialFrozen ? ' (parado)' : ''}; última falha ${lf ? `${lf.kind} às ${fmtClock(lf.at)}` : '—'}; ` +
     `próximo ciclo ${s.nextCycleAt ? fmtClock(s.nextCycleAt) : '—'}.`);
 }
 
@@ -388,8 +418,12 @@ function renderData(out, status) {
   elements['t2-bar-L'].style.width = clampPercent(br.finalShare.L);
   elements['t2-bar-F'].style.width = clampPercent(br.finalShare.F);
 
+  const unc = out.uncertainty || { pp: 0, lo: br.finalShare.L, hi: br.finalShare.L };
+  const indefinido = unc.pp > 0 && unc.lo <= 0.5 && 0.5 <= unc.hi;
   let lead;
-  if (br.leaderFinal) {
+  if (indefinido) {
+    lead = `Indefinido: diferença menor que o erro típico (Lula ${fmtPct(br.finalShare.L)} × Flávio ${fmtPct(br.finalShare.F)})`;
+  } else if (br.leaderFinal) {
     const leader = br.leaderFinal === 'L' ? 'Lula' : 'Flávio';
     const pp = Math.abs(br.finalShare.L - br.finalShare.F) * 100;
     lead = `${leader} à frente por ${fmtPp(pp)} (≈ ${fmtInt(Math.abs(br.margin.final))} votos)`;
@@ -398,7 +432,9 @@ function renderData(out, status) {
   }
   if (out.progress.unitsWithData === 0 && (status.phase || 'idle') !== 'pre') lead += ' — prévia: nenhuma zona lida ainda';
   setText(elements['t2-lead'], lead);
-  setText(elements['t2-band'], `Faixa entre métodos: Lula ${fmtPct(out.band.lo)}–${fmtPct(out.band.hi)} dos votos válidos (não é margem de erro).`);
+  setText(elements['t2-band'], unc.pp > 0
+    ? `Lula ${fmtPct(br.finalShare.L)} ± ${fmtPp(unc.pp)} (erro típico do método no ensaio com a ordem real de 2022)`
+    : `Lula ${fmtPct(br.finalShare.L)} (apuração concluída: sem margem de projeção)`);
 
   setText(elements['t2-progress'], fmtPctFloor(out.progress.electorateCountedPct));
   elements['t2-progress-bar'].style.width = clampPercent(out.progress.electorateCountedPct);
@@ -417,7 +453,7 @@ function renderData(out, status) {
   // Aviso quando o TSE já tem bem mais seções do que as zonas que o app leu.
   const lag = elements['t2-lag-note'];
   const off = status.official;
-  if (!app.rehearsal && off && off.s > 0) {
+  if (!app.rehearsal && off && off.s > 0 && !status.officialFrozen && !status.officialStale) {
     const secPct = off.st / off.s, zonePct = out.progress.electorateCountedPct;
     if (secPct - zonePct > 0.02) {
       setText(lag, `O TSE já tem ${fmtPctFloor(secPct)} das seções; a projeção ainda usa ${fmtPctFloor(zonePct)} do eleitorado (zonas sendo lidas).`);
@@ -549,6 +585,49 @@ function saveState() {
   } catch (error) { /* armazenamento pode estar desativado */ }
 }
 
+/* ---- plugin opcional (window.T2Plugin): ver o contrato no topo do arquivo ---- */
+function getPlugin() {
+  const p = typeof window !== 'undefined' ? window.T2Plugin : null;
+  return p && typeof p.tick === 'function' ? p : null;
+}
+
+function pluginStatusText() {
+  const p = getPlugin();
+  if (!p) return 'Plugin: nenhum.';
+  try {
+    return typeof p.status === 'function' ? `Plugin: ${String(p.status())}` : 'Plugin: ativo.';
+  } catch (e) { return 'Plugin: erro ao ler o status.'; }
+}
+
+function initPlugin(urls, startMs, units) {
+  const p = getPlugin();
+  if (!p) return;
+  app.pluginError = '';
+  try {
+    if (typeof p.init === 'function') {
+      p.init({ state: app.state, fetchq: app.queue, urls, cfg: { baseline: app.baseline, units, electionCode: app.electionCode, startMs } });
+    }
+  } catch (e) { app.pluginError = `Plugin: falha ao iniciar (${(e && e.message) || e})`; }
+}
+
+/* Roda depois do render do ciclo; não acumula; limite de 8 s; qualquer erro é só registrado. */
+function tickPlugin() {
+  const p = getPlugin();
+  if (!p || app.pluginBusy || app.rehearsal) return;
+  app.pluginBusy = true;
+  const v0 = app.state.version();
+  let timer = null;
+  const limit = new Promise((resolve) => { timer = setTimeout(() => resolve('timeout'), app.pluginTimeoutMs); });
+  Promise.race([Promise.resolve().then(() => p.tick()), limit])
+    .then((r) => { app.pluginError = r === 'timeout' ? 'Plugin: tick passou de 8 s' : ''; })
+    .catch((e) => { app.pluginError = `Plugin: erro no tick (${(e && e.message) || e})`; })
+    .then(() => {
+      clearTimeout(timer);
+      app.pluginBusy = false;
+      if (app.state.version() !== v0) { refreshView(); saveState(); }   // o plugin mexeu no estado (xc): recalcula
+    });
+}
+
 function startPoller() {
   if (app.poller) app.poller.stop();
   const urls = T2Tse.makeUrls({ eleicao: Number(app.electionCode) });
@@ -571,8 +650,10 @@ function startPoller() {
       app.refreshNote = false;
       refreshView();
       saveState();
+      tickPlugin();
     },
   });
+  initPlugin(urls, startMs, units);
   try { app.poller.prime(app.state); } catch (error) { /* aquecer é opcional */ }
   refreshView();
   app.poller.start();
@@ -760,12 +841,20 @@ async function init() {
   ]);
   app.baseline = baseline;
   app.prior = prior;
+  // curva de chegada (2T-1.2): opcional; sem ela ou se for inválida, a projeção segue como no 2T-1.1
+  try {
+    const curve = await readLocalJson('data/t2/curva-2026-1t.json');
+    if (curve && curve.v === 1 && curve.unidades) app.curve = curve;
+    else app.curveNote = 'curva de chegada inválida';
+  } catch (error) {
+    app.curveNote = 'curva de chegada ausente';
+  }
   try {
     app.electionCode = localStorage.getItem('t2.eleicao') || '6258';
   } catch (error) {
     app.electionCode = '6258';
   }
-  app.state = T2State.create({ engine: T2Engine, baseline, prior, fallback22: fallback.unidades });
+  app.state = T2State.create({ engine: T2Engine, baseline, prior, fallback22: fallback.unidades, curve: app.curve });
   try {
     const saved = JSON.parse(localStorage.getItem('t2.state.v1') || 'null');
     const savedElection = localStorage.getItem('t2.state.election') || '6258';
@@ -778,7 +867,7 @@ async function init() {
   startTick();
 }
 
-globalThis.T2App = { app, renderData, renderLive, renderOfficial, refreshView, recompute, fmtPctFloor, fmtAge };
+globalThis.T2App = { app, renderData, renderLive, renderOfficial, refreshView, recompute, fmtPctFloor, fmtAge, tickPlugin, pluginStatusText };
 
 init().catch((error) => {
   elements['t2-status'].textContent = 'ERRO DE DADOS';

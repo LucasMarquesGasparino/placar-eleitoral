@@ -58,3 +58,22 @@ O app do 2º turno fica em `t2.html` e `android-t2/`. Para gerar o APK no Termux
 4. Rode `sh android-t2/build-t2.sh`. O script roda os testes, cria a chave se ela não existir, gera o APK assinado e copia para `android-t2/build/placar-2t.apk`.
 
 A chave de assinatura fica em `~/.android-keys/placar-t2.keystore` (fora do repositório). Faça backup dela: um APK assinado com outra chave não atualiza o instalado e exige desinstalar antes.
+
+### Dados e ensaio do 2T-1.2 (curva de chegada)
+
+Entradas: `~/dl/votacao_secao_2026_BR.zip`, `~/dl/detalhe_votacao_secao_2026.zip` (e as de 2022). São dados baixados: rode o Python com `-I`, passando os caminhos como argumento. Os CSVs são grandes (leitura em streaming; a curva de 2026 leva cerca de 1 min, o replay de 2022 cerca de 3 min).
+
+```sh
+python3 -I scripts/t2_build_base.py --selftest
+# curva de chegada do 1T26 (vai no APK): data/t2/curva-2026-1t.json
+python3 -I scripts/t2_build_base.py --modo curva --votos ~/dl/votacao_secao_2026_BR.zip --detalhe ~/dl/detalhe_votacao_secao_2026.zip \
+    --membro-detalhe detalhe_votacao_secao_2026_BR.csv --cands L=13,F=22,CURY=70,SANTOS=14,CAIADO=55,ZEMA=30 --invalidos 28 \
+    --base data/t2/base-2026-1t.json --out data/t2/curva-2026-1t.json
+# ensaio com a ordem real do 2T de 2022 (arquivos em data/t2/dev/, não versionados)
+python3 -I scripts/t2_build_base.py --modo replay2022 --votos ~/dl/votacao_secao_2022_BR.zip --detalhe ~/dl/detalhe_votacao_secao_2022.zip \
+    --membro-detalhe detalhe_votacao_secao_2022_BRASIL.csv --out data/t2/dev/replay-2022.json --out-curva data/t2/dev/curva-2022-1t.json
+node scripts/t2-replay.js            # tabela por α e pertença exata; grava data/t2/dev/replay-2022-resultado.json (--rapido para uma versão curta)
+```
+
+Resultados e critério de adoção em `docs/t2-backtest.md`; histórico em `docs/t2-mudancas.md`.
+

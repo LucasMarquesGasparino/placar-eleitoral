@@ -145,3 +145,58 @@ test('VETOR DE OURO (cenário minúsculo, prior congelado)', () => {
   const t = r.scenarios.full.total.final.map((v) => Math.round(v * 1000) / 1000);
   t.forEach((v, j) => near(v, GOLD.totalFull[j], 2e-3, 'ouro total'));
 });
+
+// ---------- 2T-1.2: xc/xr opcionais (composição do apurado e do restante) ----------
+test('xc = xr = x dá saída idêntica à sem xc/xr (estimativa e cenários)', () => {
+  const w = S.makeWorld({ seed: 3 });
+  const opts = { lambda0: 2e6 * w.totalE / 158.7e6 };
+  const base = S.stateAt(w, 0.4);
+  const com = base.map((u) => Object.assign({}, u, { xc: u.x.slice(), xr: u.x.slice() }));
+  const a = E.project(base, { rows: w.rows, M: w.priorM }, opts), b = E.project(com, { rows: w.rows, M: w.priorM }, opts);
+  a.M.forEach((row, i) => row.forEach((v, j) => near(v, b.M[i][j], 1e-12, 'M')));
+  for (const sc of ['full', 'noLocal', 'priorOnly']) {
+    a.scenarios[sc].perUnit.forEach((p, q) => p.final.forEach((v, j) => near(v, b.scenarios[sc].perUnit[q].final[j], 1e-9, sc)));
+  }
+  // xc/xr com soma 0 ou ausentes também não mudam nada
+  const zero = base.map((u) => Object.assign({}, u, { xc: new Array(u.x.length).fill(0), xr: null }));
+  const c = E.project(zero, { rows: w.rows, M: w.priorM }, opts);
+  near(c.scenarios.full.total.final[0], a.scenarios.full.total.final[0], 1e-9, 'xc zerado == sem xc');
+});
+
+test('xc/xr só alteram unidades parciais, conservam o eleitorado e zeram no 100%', () => {
+  const w = S.makeWorld({ seed: 3 });
+  const opts = { lambda0: 2e6 * w.totalE / 158.7e6 };
+  const st = S.stateAt(w, 0.5);
+  // perturba a composição do apurado nas unidades parciais: xc "mais lulista", xr compensa
+  const pert = st.map((u) => {
+    const ec = u.y ? u.y.reduce((s, v) => s + v, 0) : 0, E0 = u.E;
+    if (!u.y || ec >= E0 - 1e-9) return u;
+    const xc = u.x.map((v) => v * ec / E0); xc[0] += 0.02 * ec; xc[1] -= Math.min(xc[1], 0.02 * ec);
+    return Object.assign({}, u, { xc, xr: u.x.map((v, i) => Math.max(0, v - xc[i])) });
+  });
+  const a = E.project(st, { rows: w.rows, M: w.priorM }, opts), b = E.project(pert, { rows: w.rows, M: w.priorM }, opts);
+  let mudou = 0, igual = 0;
+  b.scenarios.full.perUnit.forEach((p, q) => {
+    near(sum(p.final), p.E, 1e-6 * p.E + 1e-6, 'soma==E');
+    assert.ok(p.final.every((v) => v >= -1e-9) && p.rem.every((v) => v >= -1e-9));
+    const parcial = st[q].y && p.R > 0;
+    const dif = Math.abs(p.final[0] - a.scenarios.full.perUnit[q].final[0]) > 1e-9;
+    if (!parcial) { igual++; near(p.final[0], a.scenarios.full.perUnit[q].final[0], 1e-6, 'unidade sem restante/dado não muda'); } else if (dif) mudou++;
+  });
+  assert.ok(mudou > 0 && igual > 0);
+  // 100% apurado: xc/xr não importam (restante 0)
+  const full = S.stateAt(w, 1).map((u) => Object.assign({}, u, { xc: u.x.map((v) => v * 0.9), xr: u.x.map((v) => v * 0.1) }));
+  const r = E.project(full, { rows: w.rows, M: w.priorM }, opts);
+  r.scenarios.full.perUnit.forEach((p) => { p.rem.forEach((v) => near(v, 0, 1e-6, 'rem')); near(sum(p.final), p.E, 1e-6 * p.E + 1e-6, 'soma'); });
+});
+
+test('xr determina a base do restante e o comparecimento-guarda (não só o xc)', () => {
+  // uma unidade, M de ouro: com xr 100% abstenção o restante projetado é abstenção (limitada pelo guardTurnout)
+  const x = [400, 300, 100, 20, 30, 150];
+  const u = { id: 'AA|m1|z1', uf: 'AA', mun: 'm1', x, E: 1000, y: [260, 135, 15, 10, 80] };
+  const sem = E.project([u], { rows: ROWS6, M: M0_6 }, BIG).scenarios.full.perUnit[0];
+  const xrLula = [1000, 0, 0, 0, 0, 0];
+  const com = E.project([Object.assign({}, u, { xr: xrLula })], { rows: ROWS6, M: M0_6 }, BIG).scenarios.full.perUnit[0];
+  assert.ok(com.rem[0] > sem.rem[0] + 50, 'restante mais lulista quando xr é todo L: ' + com.rem[0] + ' vs ' + sem.rem[0]);
+  near(sum(com.final), 1000, 1e-6, 'soma==E');
+});

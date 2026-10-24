@@ -8,6 +8,10 @@
  *  - M = matriz de migração K x 5. Cada LINHA soma 1 (fração do que veio daquela origem para cada destino).
  *  - x  = vetor (K) de eleitores da unidade por origem no 1º turno (soma = eleitorado instalado E).
  *  - y  = vetor (5) apurado no 2º turno até agora (soma = eleitores já apurados ec). null se nada apurado.
+ *  - xc, xr (OPCIONAIS, 2T-1.2) = vetores (K) com a composição do 1º turno da parte JÁ APURADA (xc) e do RESTANTE (xr) da unidade.
+ *    O motor só usa as proporções (xc/soma(xc), xr/soma(xr)). Sem xc/xr (ou com soma 0) vale x para tudo: comportamento idêntico ao 2T-1.1.
+ *    Motivo: dentro da zona as seções que chegam primeiro não têm a composição da zona inteira (ver docs/t2-backtest.md).
+ *    estimateMigration e o resíduo do apurado usam xc; a base do restante e o comparecimento do restante usam xr.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -64,6 +68,9 @@
     return out;
   }
 
+  /* true se v é um vetor com soma positiva (xc/xr úteis). */
+  function hasMass(v) { return Array.isArray(v) && sum(v) > 0; }
+
   /* Estima M por mínimos quadrados ponderados, com linhas no simplex e prior (ridge) em priorM.
    * Cada unidade com y entra com: s = x/soma(x) (partes do 1T), t = y/ec (partes do 2T apurado), peso w = ec.
    * Objetivo: soma_u w*||t - s M||^2 + lambda0 * ||M - priorM||^2 */
@@ -75,9 +82,10 @@
       var u = units[q];
       if (!u.y) continue;
       var ec = sum(u.y);
-      var sx = sum(u.x);
+      var xs = hasMass(u.xc) ? u.xc : u.x;      // composição da parte apurada (xc, se houver)
+      var sx = sum(xs);
       if (!(ec > o.ecMin) || !(sx > 0)) continue;
-      var s = u.x.map(function (v) { return v / sx; });
+      var s = xs.map(function (v) { return v / sx; });
       var t = u.y.map(function (v) { return v / ec; });
       for (i = 0; i < K; i++) {
         if (!s[i]) continue;
@@ -152,10 +160,13 @@
       var ec = sum(y);
       if (ec > E) E = ec;
       var R = Math.max(0, E - ec);
-      var base = dot(s, M);                       // distribuição esperada por eleitor
+      var sC = hasMass(u.xc) ? scaled(u.xc, 1 / sum(u.xc)) : s;   // composição do APURADO (xc) e do RESTANTE (xr); sem eles, a da zona
+      var sR = hasMass(u.xr) ? scaled(u.xr, 1 / sum(u.xr)) : s;
+      var base = dot(sR, M);                      // distribuição esperada por eleitor no restante
+      var baseC = sC === sR ? base : dot(sC, M);  // ... e no apurado (base do resíduo)
       var r = [0, 0, 0, 0, 0];
-      if (ec > 0) for (i = 0; i < NDST; i++) r[i] = y[i] - ec * base[i];   // resíduo do apurado (soma 0)
-      P[q] = { s: s, E: E, y: y, ec: ec, R: R, base: base, r: r, delta: [0, 0, 0, 0, 0] };
+      if (ec > 0) for (i = 0; i < NDST; i++) r[i] = y[i] - ec * baseC[i];   // resíduo do apurado (soma 0)
+      P[q] = { s: sR, E: E, y: y, ec: ec, R: R, base: base, r: r, delta: [0, 0, 0, 0, 0] };
     }
     // 2) ajuste local em cascata UF -> município -> zona
     if (useLocal) {

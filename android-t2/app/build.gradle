@@ -13,7 +13,7 @@ tasks.register('syncWebAssets', Sync) {
     from(webRoot) {
         include 't2.html', 't2.js', 't2.css', 't2-engine.js', 't2-state.js', 't2-fetchq.js', 't2-sim.js', 't2-tse.js', 'styles.css', 'manifest-t2.webmanifest'
         include 'assets/**'
-        include 'data/t2/base-2026-1t.json', 'data/t2/prior-2022.json', 'data/t2/fallback-2022.json'
+        include 'data/t2/base-2026-1t.json', 'data/t2/prior-2022.json', 'data/t2/fallback-2022.json', 'data/t2/curva-2026-1t.json'
         into 'www'
     }
     into generatedWebAssets
@@ -27,8 +27,8 @@ android {
         applicationId 'br.com.lucasgasparino.placar.t2'
         minSdk 23
         targetSdk 34
-        versionCode 2
-        versionName '2T-1.1'
+        versionCode 3
+        versionName '2T-1.2'
         manifestPlaceholders = [appLabel: 'Placar 2T', startPage: 't2.html']
     }
 

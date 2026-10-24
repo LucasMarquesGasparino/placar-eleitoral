@@ -8,8 +8,12 @@ Só biblioteca padrão. Lê .csv ou .zip (CSV ';' em latin-1) em streaming (não
 MODOS
   --modo base2026   gera data/t2/base-2026-1t.json     (linhas: L,F,CURY,SANTOS,CAIADO,ZEMA,D,B,N,A) a partir do 1º turno
   --modo backtest   gera data/t2/dev/backtest-2022.json (linhas: L,F,D,B,N,A; x = 1T, yFull = 2T) a partir de 2022 (1º e 2º turnos)
+  --modo curva      gera data/t2/curva-2026-1t.json (2T-1.2): POR SEÇÃO, a ordem de chegada dos resultados no 1º turno de 2026.
+                    Para cada zona grava o desvio (composição das primeiras k seções apuradas − composição da zona) em 9 pontos.
+  --modo replay2022 gera data/t2/dev/replay-2022.json (por seção: zona, x do 1T22, y do 2T22, hora de chegada no 2T22) e
+                    data/t2/dev/curva-2022-1t.json (mesmo formato da curva de 2026, ordem do 1T22). Entrada do scripts/t2-replay.js.
   --probe ARQ       imprime o cabeçalho e 3 linhas de um CSV/ZIP (use ANTES, para conferir os nomes das colunas)
-  --selftest        cria CSVs sintéticos, roda os dois modos e confere os totais (teste de que o script funciona)
+  --selftest        cria CSVs sintéticos, roda os modos e confere os totais (teste de que o script funciona)
 
 EXEMPLOS
   python3 scripts/t2_build_base.py --probe ~/dl/votacao_secao_2026_BR.zip
@@ -21,6 +25,14 @@ EXEMPLOS
       --out data/t2/base-2026-1t.json
   python3 scripts/t2_build_base.py --modo backtest --votos votacao_secao_2022_BR.zip --detalhe detalhe_votacao_secao_2022_BR.zip \
       --out data/t2/dev/backtest-2022.json
+  # 2T-1.2 — curva de chegada de 2026 (ordem real das seções no 1T26) e ensaio com a ordem real de 2022.
+  # No zip de detalhe de 2026 há dois CSVs (…_BRASIL.csv, com todos os cargos, e …_BR.csv, só Presidente): --membro-detalhe com o nome
+  # terminado em .csv escolhe pelo nome EXATO; sem .csv vale o início do nome.
+  python3 -I scripts/t2_build_base.py --modo curva --votos ~/dl/votacao_secao_2026_BR.zip --detalhe ~/dl/detalhe_votacao_secao_2026.zip \
+      --membro-detalhe detalhe_votacao_secao_2026_BR.csv --cands L=13,F=22,CURY=70,SANTOS=14,CAIADO=55,ZEMA=30 --invalidos 28 \
+      --base data/t2/base-2026-1t.json --out data/t2/curva-2026-1t.json
+  python3 -I scripts/t2_build_base.py --modo replay2022 --votos ~/dl/votacao_secao_2022_BR.zip --detalhe ~/dl/detalhe_votacao_secao_2022.zip \
+      --membro-detalhe detalhe_votacao_secao_2022_BRASIL.csv --out data/t2/dev/replay-2022.json --out-curva data/t2/dev/curva-2022-1t.json
 
 DEFINIÇÕES (iguais às do app ao vivo — NÃO mude sem mudar o adaptador do TSE):
   unidade   = "UF|mmmmm|zzzz"  (UF maiúscula; CD_MUNICIPIO = código do TSE com 5 dígitos; NR_ZONA com 4 dígitos)
@@ -30,7 +42,7 @@ DEFINIÇÕES (iguais às do app ao vivo — NÃO mude sem mudar o adaptador do T
   D (demais)= soma dos candidatos que não estão em --cands
   E         = comp + A    (eleitorado das seções instaladas)
 """
-import argparse, csv, io, json, os, random, sys, tempfile, zipfile, datetime
+import argparse, csv, io, json, math, os, random, sys, tempfile, zipfile, datetime
 from collections import defaultdict
 
 csv.field_size_limit(2 ** 31 - 1)
@@ -49,20 +61,33 @@ ALIAS = {
 }
 
 
-def abrir(caminho, membro=None):
+def _abrir_texto(caminho, membro=None):
+    """Abre o CSV (de um zip ou solto) como texto latin-1. membro terminado em .csv = nome EXATO do arquivo dentro do zip;
+    caso contrário, o INÍCIO do nome."""
     if caminho.lower().endswith('.zip'):
         zf = zipfile.ZipFile(caminho)
         nomes = [n for n in zf.namelist() if n.lower().endswith('.csv')]
         if membro:
-            nomes = [n for n in nomes if os.path.basename(n).startswith(membro)]
+            if membro.lower().endswith('.csv'):
+                nomes = [n for n in nomes if os.path.basename(n) == membro]
+            else:
+                nomes = [n for n in nomes if os.path.basename(n).startswith(membro)]
         if not nomes:
             raise SystemExit('nenhum CSV dentro de ' + caminho)
         if len(nomes) > 1:
             print('AVISO: vários CSVs no zip; usando %s. Use --membro para escolher entre: %s' % (nomes[0], nomes), file=sys.stderr)
-        f = io.TextIOWrapper(zf.open(nomes[0]), encoding='latin-1', newline='')
-    else:
-        f = open(caminho, encoding='latin-1', newline='')
-    return csv.DictReader(f, delimiter=';', quotechar='"')
+        return io.TextIOWrapper(zf.open(nomes[0]), encoding='latin-1', newline='')
+    return open(caminho, encoding='latin-1', newline='')
+
+
+def abrir(caminho, membro=None):
+    return csv.DictReader(_abrir_texto(caminho, membro), delimiter=';', quotechar='"')
+
+
+def abrir_linhas(caminho, membro=None):
+    """Como abrir(), mas devolve (cabeçalho, leitor por listas): bem mais rápido nos CSVs de milhões de linhas."""
+    rd = csv.reader(_abrir_texto(caminho, membro), delimiter=';', quotechar='"')
+    return next(rd), rd
 
 
 def col(header, chave, obrigatoria=True):
@@ -222,6 +247,298 @@ def backtest(args):
     gravar(args.out, saida, unidades, tot, None)
 
 
+# ---------------------------------------------------------------- por seção (2T-1.2): curva de chegada e ensaio com a ordem real
+SEM_HORA = 10 ** 12           # seção sem horário de chegada: vai para o fim da fila (e é contada em stats['sem_hora'])
+_dias = {}
+
+
+def segundos(txt):
+    """'dd/mm/aaaa HH:MM:SS' (hora de Brasília como publicada pelo TSE) -> segundos desde 01/01/0001; None se vazio ou malformado."""
+    txt = (txt or '').strip()
+    if len(txt) < 19:
+        return None
+    dia = txt[:10]
+    base = _dias.get(dia)
+    try:
+        if base is None:
+            base = _dias[dia] = datetime.date(int(dia[6:10]), int(dia[3:5]), int(dia[:2])).toordinal() * 86400
+        return base + int(txt[11:13]) * 3600 + int(txt[14:16]) * 60 + int(txt[17:19])
+    except ValueError:
+        return None
+
+
+# Registro de uma seção (lista, para caber na memória):
+#   [t, aptos, comp, brancos_do_detalhe (-1 = não há coluna), *candidatos_nomeados, outros_validos, voto95, voto96]
+def _layout(nslot):
+    return {'IT': 0, 'IAP': 1, 'ICO': 2, 'IBR': 3, 'IV0': 4, 'IOUT': 4 + nslot, 'I95': 5 + nslot, 'I96': 6 + nslot}
+
+
+def ler_secoes(votos, detalhe, turno, slots, invalidos=None, membro_votos=None, membro_detalhe=None):
+    """Lê POR SEÇÃO (Presidente, um turno). slots: {numero_do_candidato: posição 0..n-1} dos candidatos nomeados; os demais válidos
+    somam em 'outros'. Devolve (secoes, zonas_com_voto, stats); secoes[(zona_id, nr_secao)] = registro (ver _layout).
+    O detalhe manda na lista de seções (como em base2026); votos de seção ausente do detalhe são descartados e contados."""
+    invalidos = invalidos or set()
+    nslot = len(slots)
+    L = _layout(nslot)
+    secs, zc = {}, {}
+    stats = {'detalhe_linhas': 0, 'sem_hora': 0, 'prim_vazio': 0, 'votos_sem_detalhe': 0, 'duplicadas': 0}
+    ts = str(turno)
+
+    def zona_id(uf, mun, zona):
+        k = (uf, mun, zona)
+        z = zc.get(k)
+        if z is None:
+            z = zc[k] = chave(uf, mun, zona)
+        return z
+
+    for caminho in lista(detalhe):
+        H, rd = abrir_linhas(caminho, membro_detalhe)
+        i = {n: H.index(col(H, n)) for n in ('turno', 'cargo', 'uf', 'mun', 'zona', 'secao', 'aptos', 'comp')}
+        cB = col(H, 'brancos', False)
+        iB = H.index(cB) if cB else None
+        iPrim = H.index('DT_PRIM_TOT_PARCIAL_HOR_TSE') if 'DT_PRIM_TOT_PARCIAL_HOR_TSE' in H else None
+        iRec = H.index('DT_RECEBIMENTO_BU_HOR_TSE') if 'DT_RECEBIMENTO_BU_HOR_TSE' in H else None
+        if iPrim is None and iRec is None:
+            raise SystemExit('o detalhe não tem DT_PRIM_TOT_PARCIAL_HOR_TSE nem DT_RECEBIMENTO_BU_HOR_TSE (horário de chegada). Cabeçalho: %s' % H)
+        for r in rd:
+            if r[i['cargo']].strip() != '1' or r[i['turno']].strip() != ts:
+                continue
+            stats['detalhe_linhas'] += 1
+            sk = (zona_id(r[i['uf']], r[i['mun']], r[i['zona']]), int(r[i['secao']]))
+            if sk in secs:
+                stats['duplicadas'] += 1
+                continue
+            t = segundos(r[iPrim]) if iPrim is not None else None
+            if t is None:
+                if iPrim is not None:
+                    stats['prim_vazio'] += 1
+                t = segundos(r[iRec]) if iRec is not None else None
+            if t is None:
+                t = SEM_HORA
+                stats['sem_hora'] += 1
+            rec = [0] * (L['I96'] + 1)
+            rec[L['IT']] = t
+            rec[L['IAP']] = int(r[i['aptos']] or 0)
+            rec[L['ICO']] = int(r[i['comp']] or 0)
+            rec[L['IBR']] = int(r[iB] or 0) if iB is not None else -1
+            secs[sk] = rec
+    zonas_com_voto = set()
+    for caminho in lista(votos):
+        H, rd = abrir_linhas(caminho, membro_votos)
+        iT, iC, iU, iM, iZ, iS, iV, iQ = (H.index(col(H, n)) for n in ('turno', 'cargo', 'uf', 'mun', 'zona', 'secao', 'votavel', 'votos'))
+        for r in rd:
+            if r[iC].strip() != '1' or r[iT].strip() != ts:
+                continue
+            z = zona_id(r[iU], r[iM], r[iZ])
+            zonas_com_voto.add(z)
+            rec = secs.get((z, int(r[iS])))
+            if rec is None:
+                stats['votos_sem_detalhe'] += 1
+                continue
+            num, q = r[iV].strip(), int(r[iQ] or 0)
+            if num == '95':
+                rec[L['I95']] += q
+            elif num == '96':
+                rec[L['I96']] += q
+            elif num in invalidos:
+                pass
+            elif num in slots:
+                rec[L['IV0'] + slots[num]] += q
+            else:
+                rec[L['IOUT']] += q
+    return secs, zonas_com_voto, stats
+
+
+def x_secao(rec, nslot):
+    """Vetor de origem da seção, no mesmo critério de montar_x (zona): [nomeados..., outros, B, N, A]. Soma = aptos (se N não for cortado)."""
+    L = _layout(nslot)
+    aptos, comp = rec[L['IAP']], rec[L['ICO']]
+    A = max(0, aptos - comp)
+    B = rec[L['IBR']] if rec[L['IBR']] >= 0 else rec[L['I95']]
+    nomeados = rec[L['IV0']:L['IOUT']]
+    total_cand = sum(nomeados) + rec[L['IOUT']]
+    N = max(0, comp - total_cand - B)
+    return nomeados + [rec[L['IOUT']], B, N, A]
+
+
+def y_secao(rec):
+    """2º turno da seção (2 nomeados): [L, F, B, N, A]."""
+    x = x_secao(rec, 2)
+    return [x[0], x[1], x[3], x[4], x[5]]
+
+
+def agrupar_por_zona(secs, zonas_com_voto, nslot):
+    """-> {zona_id: [(t, nr_secao, x), ...]} só das zonas com algum voto (como base2026), já na ordem de chegada (desempate: nº da seção)."""
+    por = defaultdict(list)
+    for (z, ns), rec in secs.items():
+        if z in zonas_com_voto:
+            por[z].append((rec[0], ns, x_secao(rec, nslot)))
+    for z in por:
+        por[z].sort(key=lambda a: (a[0], a[1]))
+    return por
+
+
+def pontos_curva(n):
+    """k_j = round(j·n/10), j = 1..9, só 1 <= k < n e sem repetir (aritmética inteira: arredonda .5 para cima)."""
+    ks = []
+    for j in range(1, 10):
+        k = (2 * j * n + 10) // 20
+        if 1 <= k < n and (not ks or k > ks[-1]):
+            ks.append(k)
+    return ks
+
+
+def _compor(soma):
+    tot = sum(soma)
+    return [v / tot for v in soma] if tot > 0 else None
+
+
+def _arred(v):
+    return int(math.floor(v + 0.5))
+
+
+def desvio_prefixo(ordenada, k, escala=10000):
+    """d(k) = round(escala · (composição das k primeiras seções − composição da zona)). d(n) = 0 por construção."""
+    K = len(ordenada[0][2])
+    tot = [0] * K
+    pre = [0] * K
+    for j, (_, _, x) in enumerate(ordenada):
+        for i in range(K):
+            tot[i] += x[i]
+            if j < k:
+                pre[i] += x[i]
+    sz, sk = _compor(tot), _compor(pre)
+    if sz is None or sk is None:
+        return [0] * K
+    return [_arred(escala * (a - b)) for a, b in zip(sk, sz)]
+
+
+def curva_zona(ordenada, escala=10000):
+    """ordenada: [(t, secao, x)] na ordem de chegada. -> {n, k:[…], d:[[…]…]} (um passe só, soma acumulada)."""
+    n = len(ordenada)
+    K = len(ordenada[0][2])
+    ks = pontos_curva(n)
+    tot = [0] * K
+    for _, _, x in ordenada:
+        for i in range(K):
+            tot[i] += x[i]
+    sz = _compor(tot)
+    pre = [0] * K
+    d, kk = [], set(ks)
+    for idx, (_, _, x) in enumerate(ordenada, 1):
+        for i in range(K):
+            pre[i] += x[i]
+        if idx in kk:
+            sk = _compor(pre)
+            if sz is None or sk is None:
+                d.append([0] * K)
+            else:
+                d.append([_arred(escala * (a - b)) for a, b in zip(sk, sz)])
+    return {'n': n, 'k': ks, 'd': d}
+
+
+def montar_curva(por_zona, rows, fonte, escala=10000, limite=3_000_000):
+    """Se o arquivo passar de 3 MB, refaz com escala 10³ (plano A0)."""
+    while True:
+        unidades = {z: curva_zona(lst, escala) for z, lst in sorted(por_zona.items())}
+        saida = {'v': 1, 'gerado_em': datetime.datetime.now().isoformat(timespec='seconds'), 'fonte': fonte, 'rows': rows, 'esc': escala, 'unidades': unidades}
+        tam = len(json.dumps(saida, separators=(',', ':')).encode('utf-8'))
+        if tam <= limite or escala <= 1000:
+            return saida, tam
+        print('curva com escala %d tem %.2f MB (> %.1f MB); refazendo com escala 1000' % (escala, tam / 1e6, limite / 1e6), file=sys.stderr)
+        escala = 1000
+
+
+def conferir_com_base(por_zona, base, rows):
+    """Compara a soma das seções com as zonas da base. Devolve cobertura e divergências."""
+    bz = {u['id']: u for u in base['unidades']}
+    cobertas = [z for z in bz if z in por_zona]
+    dif_zonas, dif_tot, n_dif = 0, 0, 0
+    exemplos = []
+    for z in cobertas:
+        soma = [sum(a[2][i] for a in por_zona[z]) for i in range(len(rows))]
+        dif = sum(abs(a - b) for a, b in zip(soma, bz[z]['x']))
+        if dif:
+            dif_zonas += 1
+            dif_tot += dif
+            if len(exemplos) < 5:
+                exemplos.append((z, soma, bz[z]['x']))
+        if len(por_zona[z]) != bz[z].get('secoes', len(por_zona[z])):
+            n_dif += 1
+    return {'zonas_base': len(bz), 'cobertas': len(cobertas), 'cobertura': len(cobertas) / max(1, len(bz)),
+            'zonas_so_na_curva': len(set(por_zona) - set(bz)), 'zonas_com_diferenca_em_x': dif_zonas,
+            'diferenca_total_abs': dif_tot, 'zonas_com_n_diferente': n_dif, 'exemplos': exemplos}
+
+
+def curva2026(args):
+    cands = dict(p.split('=') for p in args.cands.split(','))
+    invalidos = codigos_invalidos(getattr(args, 'invalidos', None))
+    rows = ['L', 'F', 'CURY', 'SANTOS', 'CAIADO', 'ZEMA', 'D', 'B', 'N', 'A']
+    if [k for k in cands] != rows[:6]:
+        raise SystemExit('--cands deve listar exatamente, nesta ordem: ' + ','.join(rows[:6]))
+    slots = {cands[r]: i for i, r in enumerate(rows[:6])}
+    secs, zonas, stats = ler_secoes(args.votos, args.detalhe, 1, slots, invalidos, args.membro_votos, args.membro_detalhe)
+    print('seções lidas: %d | zonas com voto: %d | stats: %s' % (len(secs), len(zonas), stats))
+    por_zona = agrupar_por_zona(secs, zonas, 6)
+    del secs
+    saida, tam = montar_curva(por_zona, rows, 'TSE dados abertos - votação por seção e detalhe (1º turno 2026, Presidente); ordem por DT_PRIM_TOT_PARCIAL_HOR_TSE')
+    if getattr(args, 'base', None):
+        base = json.load(open(args.base, encoding='utf-8'))
+        if base['rows'] != rows:
+            raise SystemExit('rows da base diferentes: %s' % base['rows'])
+        conf = conferir_com_base(por_zona, base, rows)
+        print('conferência com a base:', {k: v for k, v in conf.items() if k != 'exemplos'})
+        for e in conf['exemplos']:
+            print('  exemplo de diferença:', e)
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    with open(args.out, 'w', encoding='utf-8') as f:
+        json.dump(saida, f, ensure_ascii=False, separators=(',', ':'))
+    print('gravado %s | %d zonas | escala %d | %.2f MB' % (args.out, len(saida['unidades']), saida['esc'], os.path.getsize(args.out) / 1e6))
+
+
+def replay2022(args):
+    """Ensaio com a ordem real: 1º turno (x) e 2º turno (y, hora de chegada) por seção, só seções presentes nos dois turnos."""
+    rows = ['L', 'F', 'D', 'B', 'N', 'A']
+    invalidos = codigos_invalidos(getattr(args, 'invalidos', None))
+    slots = {'13': 0, '22': 1}
+    s1, z1, st1 = ler_secoes(args.votos, args.detalhe, 1, slots, invalidos, args.membro_votos, args.membro_detalhe)
+    print('1º turno: %d seções | stats %s' % (len(s1), st1))
+    s2, z2, st2 = ler_secoes(args.votos, args.detalhe, 2, slots, invalidos, args.membro_votos, args.membro_detalhe)
+    print('2º turno: %d seções | stats %s' % (len(s2), st2))
+    t0 = segundos('%s %s' % (args.dia_turno2, args.hora_inicio))
+    if t0 is None:
+        raise SystemExit('--dia-turno2/--hora-inicio inválidos')
+    ambas = sorted(k for k in s2 if k in s1 and k[0] in z1 and k[0] in z2)
+    zonas = sorted({k[0] for k in ambas})
+    zi = {z: i for i, z in enumerate(zonas)}
+    secoes, por_zona1 = [], defaultdict(list)
+    tot_y = [0] * 5
+    for k in ambas:
+        r1, r2 = s1[k], s2[k]
+        x, y = x_secao(r1, 2), y_secao(r2)
+        t2 = r2[0] - t0 if r2[0] != SEM_HORA else SEM_HORA
+        secoes.append([zi[k[0]]] + x + y + [t2])
+        por_zona1[k[0]].append((r1[0], k[1], x))
+        for i in range(5):
+            tot_y[i] += y[i]
+    for z in por_zona1:
+        por_zona1[z].sort(key=lambda a: (a[0], a[1]))
+    saida = {'v': 1, 'gerado_em': datetime.datetime.now().isoformat(timespec='seconds'),
+             'fonte': 'TSE dados abertos 2022 (Presidente): x = 1º turno; y e t2 = 2º turno de %s; t2 em segundos desde %s' % (args.dia_turno2, args.hora_inicio),
+             'rows': rows, 'colunas': ['zona'] + ['x_' + r for r in rows] + ['y_' + r for r in ['L', 'F', 'B', 'N', 'A']] + ['t2'],
+             'zonas': zonas, 'secoes': secoes}
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    with open(args.out, 'w', encoding='utf-8') as f:
+        json.dump(saida, f, ensure_ascii=False, separators=(',', ':'))
+    print('gravado %s | %d zonas | %d seções | %.1f MB | 2T: Lula %d, Bolsonaro %d (%.2f%% dos válidos)' % (
+        args.out, len(zonas), len(secoes), os.path.getsize(args.out) / 1e6, tot_y[0], tot_y[1], 100.0 * tot_y[0] / max(1, tot_y[0] + tot_y[1])))
+    curva, tam = montar_curva(por_zona1, rows, 'ordem de chegada do 1º turno de 2022 (DT_PRIM_TOT_PARCIAL_HOR_TSE), seções presentes nos dois turnos')
+    os.makedirs(os.path.dirname(os.path.abspath(args.out_curva)), exist_ok=True)
+    with open(args.out_curva, 'w', encoding='utf-8') as f:
+        json.dump(curva, f, ensure_ascii=False, separators=(',', ':'))
+    print('gravado %s | %d zonas | escala %d | %.2f MB' % (args.out_curva, len(curva['unidades']), curva['esc'], os.path.getsize(args.out_curva) / 1e6))
+
+
 def verificar(tot, esperado, force):
     if not esperado:
         return
@@ -263,7 +580,17 @@ def selftest():
     fv, fd = os.path.join(tmp, 'votos.csv'), os.path.join(tmp, 'detalhe.csv')
     esperado1 = defaultdict(int)
     HV = ['ANO_ELEICAO', 'NR_TURNO', 'SG_UF', 'CD_MUNICIPIO', 'NM_MUNICIPIO', 'NR_ZONA', 'NR_SECAO', 'CD_CARGO', 'NR_VOTAVEL', 'NM_VOTAVEL', 'QT_VOTOS']
-    HD = ['ANO_ELEICAO', 'NR_TURNO', 'SG_UF', 'CD_MUNICIPIO', 'NM_MUNICIPIO', 'NR_ZONA', 'NR_SECAO', 'CD_CARGO', 'QT_APTOS', 'QT_COMPARECIMENTO', 'QT_ABSTENCOES']
+    HD = ['ANO_ELEICAO', 'NR_TURNO', 'SG_UF', 'CD_MUNICIPIO', 'NM_MUNICIPIO', 'NR_ZONA', 'NR_SECAO', 'CD_CARGO', 'QT_APTOS', 'QT_COMPARECIMENTO', 'QT_ABSTENCOES',
+          'DT_RECEBIMENTO_BU_HOR_TSE', 'DT_PRIM_TOT_PARCIAL_HOR_TSE']
+    dia_turno = {1: '04/10/2026', 2: '25/10/2026'}
+
+    def horas(turno, secao):
+        """Horários sintéticos: a seção 3 não tem PRIM (usa o recebimento) e a 5 de BA/zona 2 não tem nenhum dos dois (vai para o fim)."""
+        seg = rnd.randint(17 * 3600, 21 * 3600)
+        rec = '%s %02d:%02d:%02d' % (dia_turno[turno], seg // 3600, seg % 3600 // 60, seg % 60)
+        seg2 = seg + rnd.randint(1, 600)
+        prim = '%s %02d:%02d:%02d' % (dia_turno[turno], seg2 // 3600, seg2 % 3600 // 60, seg2 % 60)
+        return rec, prim
     with open(fv, 'w', encoding='latin-1', newline='') as a, open(fd, 'w', encoding='latin-1', newline='') as b:
         wa, wb = csv.writer(a, delimiter=';', quoting=csv.QUOTE_ALL), csv.writer(b, delimiter=';', quoting=csv.QUOTE_ALL)
         wa.writerow(HV)
@@ -293,7 +620,12 @@ def selftest():
                             wa.writerow([2026, turno, uf, mun, 'MUN%d' % mun, zona, secao, 1, 95, 'Voto branco', br])
                             wa.writerow([2026, turno, uf, mun, 'MUN%d' % mun, zona, secao, 1, 96, 'Voto nulo', nu])
                             wa.writerow([2026, turno, uf, mun, 'MUN%d' % mun, zona, secao, 3, 13, 'LIXO (outro cargo)', 999])
-                            wb.writerow([2026, turno, uf, mun, 'MUN%d' % mun, zona, secao, 1, aptos, comp, aptos - comp])
+                            rec_h, prim_h = horas(turno, secao)
+                            if secao == 3:
+                                prim_h = ''
+                            if uf == 'BA' and zona == 2 and secao == 5:
+                                rec_h = prim_h = ''
+                            wb.writerow([2026, turno, uf, mun, 'MUN%d' % mun, zona, secao, 1, aptos, comp, aptos - comp, rec_h, prim_h])
                             if turno == 1:
                                 esperado1['B'] += br
                                 esperado1['N'] += nu + invalido
@@ -313,15 +645,69 @@ def selftest():
     assert b['rows'] == ['L', 'F', 'D', 'B', 'N', 'A'] and len(b['unidades']) == 18
     for u in b['unidades']:
         assert abs(sum(u['x']) - u['E']) < 1e-6 and abs(sum(u['yFull']) - u['E']) < 1e-6
+
+    # ---- por seção (2T-1.2)
+    assert segundos('04/10/2026 17:00:00') - segundos('04/10/2026 16:59:59') == 1 and segundos('') is None and segundos('lixo lixo lixo lixo') is None
+    assert segundos('05/10/2026 00:00:00') - segundos('04/10/2026 00:00:00') == 86400
+    assert pontos_curva(1) == [] and pontos_curva(2) == [1] and pontos_curva(5) == [1, 2, 3, 4] and pontos_curva(100) == list(range(10, 100, 10))
+    assert all(len(set(pontos_curva(n))) == len(pontos_curva(n)) and all(1 <= k < n for k in pontos_curva(n)) for n in range(1, 300))
+    # escolha do membro do zip: nome exato (.csv) x início do nome
+    zp = os.path.join(tmp, 'm.zip')
+    with zipfile.ZipFile(zp, 'w') as zf:
+        zf.writestr('det_BRASIL.csv', 'A;B\n1;2\n')
+        zf.writestr('det_BR.csv', 'C;D\n3;4\n')
+    assert abrir_linhas(zp, 'det_BR.csv')[0] == ['C', 'D'] and abrir_linhas(zp, 'det_BRASIL')[0] == ['A', 'B']
+    cands = ns.cands
+    ns3 = argparse.Namespace(votos=fv, detalhe=fd, membro_votos=None, membro_detalhe=None, invalidos='28', cands=cands, base=ns.out,
+                             out=os.path.join(tmp, 'curva.json'))
+    curva2026(ns3)
+    c = json.load(open(ns3.out))
+    assert c['v'] == 1 and c['rows'] == j['rows'] and c['esc'] == 10000 and set(c['unidades']) == {u['id'] for u in j['unidades']}
+    slots6 = {'13': 0, '22': 1, '70': 2, '14': 3, '55': 4, '30': 5}
+    secs, zonas, stats = ler_secoes(fv, fd, 1, slots6, {'28'})
+    assert stats['sem_hora'] == 3 and stats['prim_vazio'] == 3 + 18 and stats['votos_sem_detalhe'] == 0, stats   # BA/zona 2/seção 5 (3 municípios) sem hora; a seção 3 (18 zonas) cai no recebimento
+    por = agrupar_por_zona(secs, zonas, 6)
+    conf = conferir_com_base(por, j, j['rows'])
+    assert conf['cobertura'] == 1 and conf['diferenca_total_abs'] == 0 and conf['zonas_com_n_diferente'] == 0, conf    # soma das seções == zona da base
+    for u in j['unidades']:
+        cz, lst = c['unidades'][u['id']], por[u['id']]
+        assert cz['n'] == u['secoes'] == len(lst) and cz['k'] == pontos_curva(cz['n']) and len(cz['d']) == len(cz['k'])
+        assert desvio_prefixo(lst, cz['n']) == [0] * 10, 'd(k=n) deve ser 0'
+        for k, d in zip(cz['k'], cz['d']):
+            assert d == desvio_prefixo(lst, k) and abs(sum(d)) <= 10 and all(abs(v) <= 10000 for v in d)
+        assert [a[0] for a in lst] == sorted(a[0] for a in lst)                                  # ordem de chegada
+        assert [(a[0], a[1]) for a in lst] == sorted((a[0], a[1]) for a in lst)                  # com desempate pelo nº da seção
+    ba2 = por['BA|00005|0002']
+    assert ba2[-1][1] == 5 and ba2[-1][0] == SEM_HORA                                            # sem horário: última da zona
+    pequeno, tam = montar_curva(por, j['rows'], 'teste', limite=1)
+    assert pequeno['esc'] == 1000 and all(abs(v) <= 1000 for cz in pequeno['unidades'].values() for d in cz['d'] for v in d)
+    ns4 = argparse.Namespace(votos=fv, detalhe=fd, membro_votos=None, membro_detalhe=None, invalidos='28', dia_turno2='25/10/2026', hora_inicio='17:00:00',
+                             out=os.path.join(tmp, 'replay.json'), out_curva=os.path.join(tmp, 'curva22.json'))
+    replay2022(ns4)
+    rp, c22 = json.load(open(ns4.out)), json.load(open(ns4.out_curva))
+    assert rp['rows'] == ['L', 'F', 'D', 'B', 'N', 'A'] and len(rp['zonas']) == 18 and len(rp['secoes']) == 90 and c22['rows'] == rp['rows']
+    xz = defaultdict(lambda: [0] * 6)
+    for sec in rp['secoes']:
+        assert len(sec) == 1 + 6 + 5 + 1 and all(v >= 0 for v in sec[1:12])
+        for i in range(6):
+            xz[rp['zonas'][sec[0]]][i] += sec[1 + i]
+        assert sec[12] >= 0 and (sec[12] < 5 * 3600 or sec[12] == SEM_HORA), sec                    # segundos desde 17:00 do dia do 2T
+    for u in b['unidades']:
+        assert xz[u['id']] == u['x'], (u['id'], xz[u['id']], u['x'])                                 # x do 1T por seção soma a zona do backtest
+    assert all(c22['unidades'][z]['n'] == 5 for z in rp['zonas'])
     print('SELFTEST OK')
 
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--modo', choices=['base2026', 'backtest'])
+    ap.add_argument('--modo', choices=['base2026', 'backtest', 'curva', 'replay2022'])
     ap.add_argument('--votos', nargs='+'), ap.add_argument('--detalhe', nargs='+'), ap.add_argument('--out')
     ap.add_argument('--membro-votos', dest='membro_votos'), ap.add_argument('--membro-detalhe', dest='membro_detalhe')
     ap.add_argument('--cands'), ap.add_argument('--invalidos', help='números de candidaturas sem votos válidos, separados por vírgula'), ap.add_argument('--esperado'), ap.add_argument('--force', action='store_true')
+    ap.add_argument('--base', help='(curva) base-2026-1t.json para conferir a soma das seções por zona')
+    ap.add_argument('--out-curva', dest='out_curva', default='data/t2/dev/curva-2022-1t.json', help='(replay2022) curva do 1T22')
+    ap.add_argument('--dia-turno2', dest='dia_turno2', default='30/10/2022', help='(replay2022) dia do 2º turno, dd/mm/aaaa')
+    ap.add_argument('--hora-inicio', dest='hora_inicio', default='17:00:00', help='(replay2022) t=0 do ensaio (início da apuração em Brasília)')
     ap.add_argument('--probe'), ap.add_argument('--membro')
     ap.add_argument('--selftest', action='store_true')
     a = ap.parse_args()
@@ -333,5 +719,9 @@ if __name__ == '__main__':
         base2026(a)
     elif a.modo == 'backtest':
         backtest(a)
+    elif a.modo == 'curva':
+        curva2026(a)
+    elif a.modo == 'replay2022':
+        replay2022(a)
     else:
         ap.print_help()
