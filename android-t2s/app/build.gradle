@@ -1,0 +1,70 @@
+plugins {
+    id 'com.android.application'
+}
+
+def webRoot = rootProject.projectDir.parentFile
+
+def generatedWebAssets = layout.buildDirectory.dir('generated/webAssets')
+
+// Chave estável FORA do repositório: APKs novos são assinados com a mesma chave (atualização sem desinstalar).
+def t2Keystore = new File(System.getProperty('user.home'), '.android-keys/placar-t2.keystore')
+
+tasks.register('syncWebAssets', Sync) {
+    from(webRoot) {
+        // Mesmos arquivos do app 2T (android-t2) + os do modo Seção. Ao mudar a lista do android-t2, rode scripts/t2s-sync.sh.
+        include 't2.html', 't2.js', 't2.css', 't2-engine.js', 't2-state.js', 't2-fetchq.js', 't2-sim.js', 't2-tse.js', 'styles.css', 'manifest-t2.webmanifest'
+        include 't2s.html', 'manifest-t2s.webmanifest', 't2-pertenca.js', 't2s-plugin.js'
+        include 'assets/**'
+        include 'data/t2/base-2026-1t.json', 'data/t2/prior-2022.json', 'data/t2/fallback-2022.json'
+        include 'data/t2/curva-2026-1t.json'     // gerada pelo Plano A; se faltar, o Sync apenas não a copia (o app segue sem curva)
+        include 'data/t2/secoes/**'              // base por seção do 1T26 (scripts/t2_build_secoes.py), uma por UF, carregada sob demanda
+        into 'www'
+    }
+    into generatedWebAssets
+}
+
+android {
+    namespace 'br.com.lucasgasparino.placar'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'br.com.lucasgasparino.placar.t2secao'     // instala ao lado do Placar 2T (br...placar.t2)
+        minSdk 23
+        targetSdk 34
+        versionCode 1
+        versionName 'Secao-1.0'
+        manifestPlaceholders = [appLabel: 'Placar 2T Seção', startPage: 't2s.html']
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main.assets.srcDir generatedWebAssets
+    }
+
+    signingConfigs {
+        placarT2 {
+            storeFile t2Keystore
+            storePassword 'placart2'
+            keyAlias 'placart2'
+            keyPassword 'placart2'
+        }
+    }
+
+    buildTypes {
+        debug {
+            if (t2Keystore.exists()) signingConfig signingConfigs.placarT2
+        }
+        release {
+            minifyEnabled false
+            if (t2Keystore.exists()) signingConfig signingConfigs.placarT2
+        }
+    }
+}
+
+tasks.named('preBuild').configure {
+    dependsOn tasks.named('syncWebAssets')
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Placar Eleitoral 2T Seção",
+  "short_name": "Placar 2T Seção",
+  "lang": "pt-BR",
+  "start_url": "./t2s.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f5f1",
+  "theme_color": "#f4f5f1"
+}

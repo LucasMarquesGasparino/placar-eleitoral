@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f4f5f1" />
+    <meta name="description" content="Projeção estatística do segundo turno com dados oficiais do TSE." />
+    <link rel="manifest" href="./manifest-t2s.webmanifest" />
+    <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./t2.css" />
+    <title>Placar 2T · Seção</title>
+  </head>
+  <body class="t2-page">
+    <header class="topbar t2-topbar">
+      <a class="brand" href="./t2s.html" aria-label="Placar, segundo turno">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span>placar<span class="brand-dot">.</span><small class="t2-brand-tag">2º turno · seção</small></span>
+      </a>
+      <div class="topbar-right t2-header-actions">
+        <span class="live-label"><span class="live-dot"></span><span id="t2-status">PRÉVIA</span></span>
+        <button class="refresh-button" id="t2-refresh" type="button" aria-label="Atualizar agora">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 12-2L20 9M4 15l2.4 2a7 7 0 0 0 12-2"/></svg>
+          <span>Atualizar</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="page-shell t2-shell">
+      <section class="intro-row t2-intro">
+        <div>
+          <p class="eyebrow">ELEIÇÕES 2026 · PRESIDENTE DA REPÚBLICA</p>
+          <h1>Lula × Flávio Bolsonaro</h1>
+          <p class="intro-copy">Projeção do resultado final com base na votação por zona e nos arquivos oficiais publicados pelo TSE.</p>
+        </div>
+        <div class="update-card" aria-live="polite">
+          <span class="update-icon" aria-hidden="true">↻</span>
+          <span><strong>Última atualização</strong><small id="t2-updated">—</small><small id="t2-tse-time" class="t2-tse-time"></small></span>
+        </div>
+      </section>
+
+      <div id="t2-alert" class="error-banner hidden" role="status"></div>
+      <div id="t2-rehearsal-label" class="t2-rehearsal-label hidden" role="status">ENSAIO — dados sintéticos; não são resultados eleitorais.</div>
+      <div id="t2-conn" class="t2-conn is-info" role="status" aria-live="polite">
+        <span class="t2-conn-dot" aria-hidden="true"></span>
+        <strong id="t2-conn-label">PRÉVIA</strong>
+        <span id="t2-conn-detail" class="t2-conn-detail">Carregando…</span>
+      </div>
+
+      <section class="prediction-panel t2-official-panel" aria-labelledby="t2-official-title">
+        <div class="panel-heading">
+          <div><p class="eyebrow">APURAÇÃO OFICIAL · TSE</p><h2 id="t2-official-title">Seções apuradas: <span id="t2-off-secpct">—</span></h2></div>
+          <span id="t2-off-sections" class="order-note">—</span>
+        </div>
+        <div class="t2-off-body">
+          <div class="progress-track t2-progress-track"><span id="t2-off-progress-bar"></span></div>
+          <div class="t2-off-duel">
+            <div class="t2-off-cand t2-off-lula"><span class="t2-off-name">Lula</span><strong id="t2-off-L-pct">—</strong><small id="t2-off-L-votes">—</small></div>
+            <div class="t2-off-cand t2-off-flavio"><span class="t2-off-name">Flávio Bolsonaro</span><strong id="t2-off-F-pct">—</strong><small id="t2-off-F-votes">—</small></div>
+          </div>
+          <div class="prediction-bar-track t2-off-bar" role="img" aria-label="Proporção apurada de votos válidos">
+            <div class="prediction-bar-fill prediction-bar-lula" id="t2-off-bar-L" style="width:50%"></div>
+            <div class="prediction-bar-fill prediction-bar-flavio" id="t2-off-bar-F" style="width:50%"></div>
+          </div>
+          <p id="t2-off-lead" class="t2-off-lead">A apuração começa às 17:00 (horário de Brasília) de 25/10.</p>
+          <p id="t2-off-extra" class="t2-off-extra"></p>
+        </div>
+      </section>
+
+      <section class="prediction-panel t2-projection-panel" aria-labelledby="t2-projection-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">PROJEÇÃO DO RESULTADO FINAL</p>
+            <h2 id="t2-projection-title">Brasil inteiro</h2>
+          </div>
+          <span id="t2-status-pill" class="prediction-badge t2-status-badge">PRÉVIA</span>
+        </div>
+        <div id="t2-phase-message" class="t2-phase-message" aria-live="polite">Carregando a prévia com dados históricos.</div>
+        <div class="prediction-duel t2-duel">
+          <article class="prediction-card prediction-lula">
+            <span class="prediction-candidate-label">Lula</span>
+            <strong class="prediction-percent" id="t2-L-pct">—</strong>
+            <span class="prediction-votes" id="t2-L-votes">—</span>
+            <span class="prediction-counted">votos projetados</span>
+          </article>
+          <span class="prediction-vs" aria-hidden="true">×</span>
+          <article class="prediction-card prediction-flavio">
+            <span class="prediction-candidate-label">Flávio Bolsonaro</span>
+            <strong class="prediction-percent" id="t2-F-pct">—</strong>
+            <span class="prediction-votes" id="t2-F-votes">—</span>
+            <span class="prediction-counted">votos projetados</span>
+          </article>
+        </div>
+        <div class="prediction-bar-wrap t2-bar-wrap" role="img" aria-label="Barra com a proporção projetada de votos válidos">
+          <div class="prediction-bar-track">
+            <div class="prediction-bar-fill prediction-bar-lula" id="t2-bar-L" style="width:50%"></div>
+            <div class="prediction-bar-fill prediction-bar-flavio" id="t2-bar-F" style="width:50%"></div>
+          </div>
+          <div class="prediction-bar-labels"><span class="prediction-bar-label-lula">Lula</span><span class="prediction-bar-label-flavio">Flávio</span></div>
+        </div>
+        <div class="t2-outcome-lines">
+          <p id="t2-lead" class="t2-lead">Calculando a projeção…</p>
+          <p id="t2-band" class="t2-band">Lula — ± — <span>(erro típico do método no ensaio com a ordem real de 2022)</span></p>
+        </div>
+        <p class="prediction-note t2-disclaimer"><strong>Projeção estatística. Não é resultado oficial.</strong> Fonte dos dados: TSE.</p>
+      </section>
+
+      <section class="prediction-panel t2-panel" aria-labelledby="t2-counted-title">
+        <div class="panel-heading">
+          <div><p class="eyebrow">BASE DA PROJEÇÃO</p><h2 id="t2-counted-title">Zonas lidas pelo app</h2></div>
+          <span id="t2-counted-state" class="order-note">Aguardando dados</span>
+        </div>
+        <div class="t2-counted-content">
+          <div class="t2-progress-line"><strong id="t2-progress">0,00%</strong><span>do eleitorado nas zonas lidas</span><span id="t2-sections" class="t2-sections">—</span></div>
+          <div class="progress-track t2-progress-track"><span id="t2-progress-bar"></span></div>
+          <p id="t2-now-pct" class="t2-now-pct">Votos válidos apurados: —</p>
+          <p id="t2-lag-note" class="t2-lag-note hidden"></p>
+          <p id="t2-forneed" class="t2-forneed hidden"></p>
+        </div>
+      </section>
+
+      <section class="prediction-panel t2-panel" aria-labelledby="t2-migration-title">
+        <div class="panel-heading">
+          <div><p class="eyebrow">1º TURNO → 2º TURNO</p><h2 id="t2-migration-title">De onde vêm os votos</h2></div>
+          <button id="t2-mode-toggle" class="country-reset" type="button" aria-pressed="false">Ver em votos</button>
+        </div>
+        <p class="prediction-note t2-section-note">A matriz mostra como cada grupo do 1º turno se distribui na projeção do 2º turno. A confiança cresce conforme há mais zonas apuradas.</p>
+        <div class="table-wrap">
+          <table class="prediction-table t2-migration-table">
+            <thead><tr><th>Origem</th><th class="numeric">Votos 1T</th><th class="numeric">→ Lula</th><th class="numeric">→ Flávio</th><th class="numeric">→ Branco</th><th class="numeric">→ Nulo</th><th class="numeric">→ Abstenção</th><th>Confiança</th></tr></thead>
+            <tbody id="t2-migration"><tr><td colspan="8" class="empty-cell">Calculando a matriz…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="table-footer t2-migration-footer">Votos válidos: 1º turno <strong id="t2-valid-1t">—</strong> → 2º turno projetado <strong id="t2-valid-2t">—</strong> (<span id="t2-valid-delta">—</span>).</div>
+      </section>
+
+      <section class="prediction-panel t2-panel" aria-labelledby="t2-ufs-title">
+        <div class="panel-heading">
+          <div><p class="eyebrow">RESULTADOS PROJETADOS</p><h2 id="t2-ufs-title">Estados</h2></div>
+          <span class="order-note">Toque em um estado para ver municípios</span>
+        </div>
+        <div class="table-wrap">
+          <table class="prediction-table t2-uf-table">
+            <thead><tr><th>UF / Estado</th><th class="numeric">Apurado</th><th class="numeric">Atual Lula / Flávio</th><th class="numeric">Proj. Lula / Flávio</th><th>À frente</th><th class="numeric">Margem</th></tr></thead>
+            <tbody id="t2-ufs"><tr><td colspan="6" class="empty-cell">Carregando estados…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="t2-municipal-panel" class="prediction-panel t2-panel hidden" aria-labelledby="t2-mun-title">
+        <div class="panel-heading">
+          <div><p class="eyebrow">DETALHE POR MUNICÍPIO</p><h2 id="t2-mun-title">Municípios</h2></div>
+          <button id="t2-mun-close" class="country-reset" type="button">Fechar</button>
+        </div>
+        <div class="table-wrap">
+          <table class="prediction-table t2-uf-table">
+            <thead><tr><th>Município</th><th class="numeric">Apurado</th><th class="numeric">Atual Lula / Flávio</th><th class="numeric">Proj. Lula / Flávio</th><th>À frente</th><th class="numeric">Margem</th></tr></thead>
+            <tbody id="t2-municipal-rows"></tbody>
+          </table>
+        </div>
+        <div class="table-footer">Exibimos os 15 municípios com maior eleitorado nesta UF.</div>
+      </section>
+
+      <details class="prediction-panel t2-diagnostics">
+        <summary>Diagnóstico e ensaio</summary>
+        <div id="t2-diag" class="t2-diag-content">
+          <p id="t2-eleicao-status">Verificando o código da eleição…</p>
+          <form id="t2-election-form" class="t2-election-form">
+            <label for="t2-eleicao-input">Código da eleição</label>
+            <input id="t2-eleicao-input" name="eleicao" inputmode="numeric" pattern="[0-9]{1,6}" maxlength="6" value="6258" />
+            <button class="country-reset" type="submit">Salvar código</button>
+          </form>
+          <div class="t2-diag-grid">
+            <p id="t2-diag-migration">Peso: —</p>
+            <p id="t2-diag-units">Unidades: —</p>
+            <p id="t2-diag-updates">Atualizações: —</p>
+            <p id="t2-diag-poller">Poller: —</p>
+            <p id="t2-diag-queue">Fila TSE: —</p>
+            <p id="t2-diag-official">Oficial × soma das zonas: —</p>
+            <p id="t2-diag-arrival">Curva de chegada: —</p>
+            <p id="t2-diag-plugin">Plugin: —</p>
+          </div>
+          <p id="t2-diag-errors" class="t2-diag-errors"></p>
+          <button id="t2-rehearsal" class="refresh-button t2-rehearsal-button" type="button">Iniciar modo ensaio sintético</button>
+          <p class="t2-diag-caption">O ensaio usa votos sintéticos sobre a base das zonas de 2026; ele não consulta o resultado de 2º turno.</p>
+        </div>
+      </details>
+
+      <footer class="page-footer t2-footer">
+        <div class="footer-source"><span class="source-mark">TSE</span><span>Dados oficiais do Tribunal Superior Eleitoral</span></div>
+        <div class="footer-links"><a href="https://resultados.tse.jus.br/oficial/app/index.html" target="_blank" rel="noreferrer">Resultados oficiais ↗</a></div>
+        <p>Os votos ainda não apurados são estimados a partir do 1º turno e da migração observada nas zonas já totalizadas. A faixa compara métodos e não representa uma margem de erro.</p>
+      </footer>
+    </main>
+
+    <script src="./t2-engine.js" defer></script>
+    <script src="./t2-state.js" defer></script>
+    <script src="./t2-fetchq.js" defer></script>
+    <script src="./t2-sim.js" defer></script>
+    <script src="./t2-tse.js" defer></script>
+    <script src="./t2-pertenca.js" defer></script>
+    <script src="./t2s-plugin.js" defer></script>
+    <script src="./t2.js" defer></script>
+  </body>
+</html>
