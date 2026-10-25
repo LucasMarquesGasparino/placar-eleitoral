@@ -72,7 +72,14 @@ python3 -I scripts/t2_build_base.py --modo curva --votos ~/dl/votacao_secao_2026
 # ensaio com a ordem real do 2T de 2022 (arquivos em data/t2/dev/, não versionados)
 python3 -I scripts/t2_build_base.py --modo replay2022 --votos ~/dl/votacao_secao_2022_BR.zip --detalhe ~/dl/detalhe_votacao_secao_2022.zip \
     --membro-detalhe detalhe_votacao_secao_2022_BRASIL.csv --out data/t2/dev/replay-2022.json --out-curva data/t2/dev/curva-2022-1t.json
-node scripts/t2-replay.js            # tabela por α e pertença exata; grava data/t2/dev/replay-2022-resultado.json (--rapido para uma versão curta)
+node scripts/t2-replay.js            # tabela por α, 2T-1.3 (rampa) e pertença exata, MAE por faixa e critério; grava data/t2/dev/replay-2022-resultado.json (--rapido para uma versão curta; --sem-fino sem os pontos de 1%; --sensibilidade para a grade α máx × rampa; --grade 0.6/0,0.7/0.15 troca essa grade; --alvo/--rampa mudam a variante v13; --alfa-estrela imprime α*(f); --mae-janela 30,150 muda a janela do MAE por horário)
+# 2T-1.4: ensaio fora da amostra com o 2T de 2018 (mesmo formato; --modo replay generaliza o replay2022, que segue como apelido)
+python3 -I scripts/t2_build_base.py --modo replay --cands L=13,F=17,CIRO=12,ALCKMIN=45 --dia-turno2 28/10/2018 \
+    --votos ~/dl/tse2018/votacao_secao_2018_BR.zip --detalhe ~/dl/tse2018/detalhe_votacao_secao_2018.zip \
+    --membro-detalhe detalhe_votacao_secao_2018_BR.csv --out data/t2/dev/replay-2018.json --out-curva data/t2/dev/curva-2018-1t.json
+node scripts/t2-replay.js --replay data/t2/dev/replay-2018.json --curva data/t2/dev/curva-2018-1t.json --rotulo 2018 --tmax 240
+# faixas combinadas (máximo classe a classe de 2022 e 2018): imprime ENV_SEM_CURVA, ENV_CURVA e ENV_PERTENCA (versão por seção) para t2-state.js
+node scripts/t2-replay.js --combinar data/t2/dev/replay-2022-resultado.json,data/t2/dev/replay-2018-resultado.json
 ```
 
 Resultados e critério de adoção em `docs/t2-backtest.md`; histórico em `docs/t2-mudancas.md`.

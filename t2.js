@@ -22,13 +22,16 @@ const elements = Object.fromEntries([
   't2-conn', 't2-conn-label', 't2-conn-detail',
   't2-phase-message', 't2-L-pct', 't2-L-votes', 't2-F-pct', 't2-F-votes', 't2-bar-L', 't2-bar-F',
   't2-lead', 't2-band', 't2-counted-state', 't2-progress', 't2-progress-bar', 't2-sections',
-  't2-now-pct', 't2-lag-note', 't2-forneed', 't2-mode-toggle', 't2-migration', 't2-valid-1t', 't2-valid-2t',
+  't2-now-pct', 't2-lag-note', 't2-forneed', 't2-rehearsal-2022', 't2-mode-toggle', 't2-migration', 't2-valid-1t', 't2-valid-2t',
   't2-valid-delta', 't2-ufs', 't2-municipal-panel', 't2-mun-title', 't2-municipal-rows',
   't2-mun-close', 't2-eleicao-status', 't2-election-form', 't2-eleicao-input', 't2-diag-migration',
   't2-diag-units', 't2-diag-updates', 't2-diag-poller', 't2-diag-queue', 't2-diag-official',
   't2-diag-errors', 't2-rehearsal', 't2-diag-arrival', 't2-diag-plugin',
   't2-off-secpct', 't2-off-sections', 't2-off-progress-bar', 't2-off-L-pct', 't2-off-L-votes',
   't2-off-F-pct', 't2-off-F-votes', 't2-off-bar-L', 't2-off-bar-F', 't2-off-lead', 't2-off-extra',
+  't2-vs22-state', 't2-vs22-intro', 't2-vs22-apurado', 't2-vs22-apurado-sub', 't2-vs22-proj', 't2-vs22-proj-sub', 't2-vs22-sobra',
+  't2-vs22-sobra-sub', 't2-vs22-meter-fill', 't2-vs22-meter-band', 't2-vs22-meter-cap', 't2-vs22-chance', 't2-vs22-falta', 't2-vs22-fatia',
+  't2-vs22-chart', 't2-vs22-chart-cap',
 ].map((id) => [id, document.getElementById(id)]));
 
 const app = {
@@ -49,7 +52,9 @@ const app = {
   rehearsal: false,
   rehearsalTimer: null,
   rehearsalStatus: null,
-  savedStateBeforeRehearsal: null,
+  realState: null,
+  vs22Hist: [],             // evolução da sobra contra 2022 (painel "contra 2022")
+  vs22HistReal: null,       // histórico real guardado durante o ensaio
   rehearsalUnits: null,
   userInteracted: false,
   wakeLock: null,
@@ -372,9 +377,13 @@ function renderDiagnostics(out, status) {
   renderPollerDiag(status);
   const band = `Faixa entre métodos (cenário principal, sem ajuste local, só prior): Lula ${fmtPct(out.band.lo)}–${fmtPct(out.band.hi)} dos votos válidos (não é margem de erro).`;
   const curveText = diagnostics.curveLoaded
-    ? `Curva de chegada: carregada (${fmtInt(diagnostics.curveUnits)} zonas), α=${diagnostics.arrivalAlpha}, aplicada em ${fmtInt(diagnostics.arrivalApplied)} zonas`
+    ? `Curva de chegada: carregada (${fmtInt(diagnostics.curveUnits)} zonas), α=${diagnostics.arrivalAlpha}${diagnostics.arrivalRamp > 0 ? ` (rampa até ${Math.round(diagnostics.arrivalRamp * 100)}% da zona)` : ''}, aplicada em ${fmtInt(diagnostics.arrivalApplied)} zonas`
     : `Curva de chegada: não carregada${diagnostics.curveNote || app.curveNote ? ` (${diagnostics.curveNote || app.curveNote})` : ''}`;
-  setText(elements['t2-diag-arrival'], `${curveText}; pertença exata em ${fmtInt(diagnostics.membershipApplied)} zonas. ${band}`);
+  const unc = out.uncertainty;
+  const calib = unc && unc.pp > 0 && unc.classe
+    ? ` Faixa calibrada: ±${fmtPp(unc.pp)} na classe ${Math.round(unc.classe.de * 100)}–${Math.round(unc.classe.ate * 100)}% apurado (2× o maior erro nos ensaios com a ordem real de 2018 e 2022, 100 classes de 1%${diagnostics.membershipApplied > 0 ? '; com pertença exata, a faixa própria da versão por seção' : ''}). Nos dois ensaios a projeção começou superestimando o candidato do PT.`
+    : '';
+  setText(elements['t2-diag-arrival'], `${curveText}; pertença exata em ${fmtInt(diagnostics.membershipApplied)} zonas. ${band}${calib}`);
   setText(elements['t2-diag-plugin'], pluginStatusText());
   setText(elements['t2-diag-queue'], `Fila: ${status.queue ? JSON.stringify(status.queue) : 'sem fila ativa'}.`);
   if (status.official && Array.isArray(status.official.y)) {
@@ -432,9 +441,9 @@ function renderData(out, status) {
   }
   if (out.progress.unitsWithData === 0 && (status.phase || 'idle') !== 'pre') lead += ' — prévia: nenhuma zona lida ainda';
   setText(elements['t2-lead'], lead);
-  setText(elements['t2-band'], unc.pp > 0
-    ? `Lula ${fmtPct(br.finalShare.L)} ± ${fmtPp(unc.pp)} (erro típico do método no ensaio com a ordem real de 2022)`
-    : `Lula ${fmtPct(br.finalShare.L)} (apuração concluída: sem margem de projeção)`);
+  setText(elements['t2-band'], (unc.pp > 0
+    ? `Lula ${fmtPct(br.finalShare.L)} ± ${fmtPp(unc.pp)} (faixa: 2× o maior erro nos ensaios com a ordem real de 2018 e 2022; nos dois, o começo da noite superestimou o candidato do PT)`
+    : `Lula ${fmtPct(br.finalShare.L)} (apuração concluída: sem margem de projeção)`) + chanceText(out.chance, unc));
 
   setText(elements['t2-progress'], fmtPctFloor(out.progress.electorateCountedPct));
   elements['t2-progress-bar'].style.width = clampPercent(out.progress.electorateCountedPct);
@@ -476,10 +485,170 @@ function renderData(out, status) {
   } else {
     elements['t2-forneed'].classList.add('hidden');
   }
+  renderVs2022(out);
   renderMigration(out);
   renderUfs(out);
   renderDiagnostics(out, status);
   renderOfficial(status);
+}
+
+/* Chance a partir da projeção e da faixa calibrada (t de 4 g.l., escala = metade da faixa). Até 95% apurado vem limitada a [5%, 95%]
+ * (teto): os extremos aparecem como "> 95%" / "< 5%"; depois, "> 99%" / "< 1%". */
+function fmtChance(p, teto) {
+  if (teto && p >= teto - 1e-9) return `> ${Math.round(teto * 100)}%`;
+  if (teto && p <= 1 - teto + 1e-9) return `< ${Math.round((1 - teto) * 100)}%`;
+  if (p >= 0.995) return '> 99%';
+  if (p <= 0.005) return '< 1%';
+  return `${Math.round(p * 100)}%`;
+}
+function chanceText(c, unc) {
+  if (!c || !(unc && unc.pp > 0)) return '';
+  return ` · chance de vitória: Lula ${fmtChance(c.L, c.teto)}, Flávio ${fmtChance(c.F, c.teto)}`;
+}
+/* Votos com sinal, em mil / mi. */
+function fmtVotos(v, signed) {
+  const n = Number(v) || 0, a = Math.abs(n), sg = signed ? (n > 0 ? '+' : n < 0 ? '−' : '') : (n < 0 ? '−' : '');
+  if (a >= 995000) return `${sg}${percentFormat.format(a / 1e6)} mi`;
+  if (a >= 1000) return `${sg}${fmtInt(Math.round(a / 1000))} mil`;
+  return `${sg}${fmtInt(Math.round(a))}`;
+}
+
+/* Painel "contra 2022" (2T-1.4.1): quanto da vantagem que Lula teria repetindo o 2º turno de 2022 em cada zona (com os votos válidos de
+ * hoje) ele já perdeu no apurado e perde na projeção, a sobra ± o erro da faixa calibrada, a chance de a sobra chegar a zero e a evolução.
+ * Só apresentação: os números vêm de out.vs2022 (t2-state.js). */
+const VS22_HIST_KEY = 't2-vs22-hist';
+const VS22_HIST_MAX = 600;
+
+function vs22Show(id, on) { elements[id].classList.toggle('hidden', !on); }
+
+function vs22Clear(estado, intro) {
+  setText(elements['t2-vs22-state'], estado);
+  setText(elements['t2-vs22-intro'], intro);
+  ['t2-vs22-apurado', 't2-vs22-proj', 't2-vs22-sobra'].forEach((id) => { setText(elements[id], '—'); elements[id].className = ''; });
+  setText(elements['t2-vs22-apurado-sub'], 'nenhuma zona lida ainda');
+  setText(elements['t2-vs22-proj-sub'], 'votos de margem em relação a 2022');
+  setText(elements['t2-vs22-sobra-sub'], 'abaixo de zero, Lula perde');
+  elements['t2-vs22-meter-fill'].style.width = '0%';
+  elements['t2-vs22-meter-band'].style.width = '0%';
+  setText(elements['t2-vs22-meter-cap'], '—');
+  ['t2-vs22-chance', 't2-vs22-falta', 't2-vs22-fatia'].forEach((id) => vs22Show(id, false));
+}
+
+/* Histórico da sobra: um ponto por avanço de 0,1% no apurado; no ensaio fica só em memória (app.vs22Hist é trocado em start/stopRehearsal). */
+function vs22Record(ap, sobra, erro) {
+  const h = app.vs22Hist, last = h[h.length - 1];
+  if (last && ap < last.ap - 0.005) h.length = 0;                  // apurado voltou (nova eleição / estado zerado)
+  else if (last && ap - last.ap < 0.001) { last.sobra = sobra; last.erro = erro; return; }
+  h.push({ ap, sobra, erro });
+  if (h.length > VS22_HIST_MAX) h.splice(0, h.length - VS22_HIST_MAX);
+  if (app.rehearsal) return;
+  try { localStorage.setItem(VS22_HIST_KEY, JSON.stringify({ eleicao: app.electionCode, pts: h })); } catch (error) { /* armazenamento pode estar desativado */ }
+}
+
+function vs22LoadHist() {
+  app.vs22Hist = [];
+  try {
+    const saved = JSON.parse(localStorage.getItem(VS22_HIST_KEY) || 'null');
+    if (saved && saved.eleicao === app.electionCode && Array.isArray(saved.pts)) {
+      app.vs22Hist = saved.pts.filter((p) => p && Number.isFinite(p.ap) && Number.isFinite(p.sobra) && Number.isFinite(p.erro)).slice(-VS22_HIST_MAX);
+    }
+  } catch (error) { /* histórico salvo pode estar vazio ou corrompido */ }
+}
+
+/* Gráfico SVG (só números gerados aqui, nada vindo de fora): x = % apurado (0–100%), y = sobra; faixa = ± erro; tracejado = zero. */
+function vs22Chart() {
+  const el = elements['t2-vs22-chart'], h = app.vs22Hist;
+  if (h.length < 2) { vs22Show('t2-vs22-chart', false); vs22Show('t2-vs22-chart-cap', false); return; }
+  const W = 600, H = 150;
+  let lo = 0, hi = 0;
+  h.forEach((p) => { lo = Math.min(lo, p.sobra - p.erro); hi = Math.max(hi, p.sobra + p.erro); });
+  const pad = (hi - lo) * 0.08 || 1;
+  lo -= pad; hi += pad;
+  const X = (ap) => (Math.max(0, Math.min(1, ap)) * W).toFixed(1);
+  const Y = (v) => ((hi - v) / (hi - lo) * H).toFixed(1);
+  const top = h.map((p) => `${X(p.ap)},${Y(p.sobra + p.erro)}`), bot = h.slice().reverse().map((p) => `${X(p.ap)},${Y(p.sobra - p.erro)}`);
+  const line = h.map((p) => `${X(p.ap)},${Y(p.sobra)}`).join(' ');
+  const last = h[h.length - 1], cor = last.sobra >= 0 ? '#ba3e32' : '#206592';
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}" aria-hidden="true">` +
+    `<polygon points="${top.concat(bot).join(' ')}" fill="#e2f1ef"/>` +
+    `<line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" stroke="#a52f2f" stroke-width="1.2" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>` +
+    `<polyline points="${line}" fill="none" stroke="${cor}" stroke-width="2.2" vector-effect="non-scaling-stroke"/></svg>` +
+    `<div class="t2-vs22-axis"><span>0%</span><span>50% apurado</span><span>100%</span></div>`;
+  vs22Show('t2-vs22-chart', true);
+  vs22Show('t2-vs22-chart-cap', true);
+}
+
+function renderVs2022(out) {
+  const v = out && out.vs2022;
+  if (!v) {
+    vs22Clear('Indisponível', 'Sem o 2º turno de 2022 por zona, o contador não pode ser calculado.');
+    vs22Chart();
+    return;
+  }
+  if (!(v.cobertura > 0.5)) {
+    vs22Clear('Indisponível', `Só ${fmtPct(v.cobertura)} do eleitorado tem o 2º turno de 2022 na mesma zona; o contador precisa de mais da metade.`);
+    vs22Chart();
+    return;
+  }
+  const m = v.margem, comApurado = m.perdaApurado !== null;
+  vs22Clear(comApurado ? (app.rehearsal ? 'Ensaio' : 'Ao vivo') : 'Aguardando a apuração',
+    `Se cada zona repetisse a fatia de Lula no 2º turno de 2022, com os votos válidos de hoje, ele teria uma vantagem de ${fmtVotos(m.vantagem2022, true)} votos. ` +
+    'O contador mostra quanto disso ele vai perdendo (−) ou ganhando (+).');
+  const r = v.restante;
+  if (r) {
+    let falta;
+    if (r.precisa <= 0) falta = 'No que falta apurar, Lula já não precisa de votos para vencer.';
+    else if (r.precisa > 1) falta = 'Lula não alcança mais a vitória, nem com todos os votos válidos restantes.';
+    else {
+      const folga = r.folga * 100;
+      falta = `No que falta: nessas zonas Lula teve ${fmtPct(r.lula22)} dos válidos em 2022 e precisa de ${fmtPct(r.precisa)} para vencer — ` +
+        (folga >= 0 ? `pode cair até ${fmtPp(folga)} em relação a 2022.` : `precisa superar 2022 em ${fmtPp(-folga)}.`);
+    }
+    setText(elements['t2-vs22-falta'], falta);
+    vs22Show('t2-vs22-falta', true);
+  }
+  if (!comApurado) { vs22Chart(); return; }
+
+  const sinal = (el, x) => { el.className = x > 0 ? 't2-leader-l' : x < 0 ? 't2-leader-f' : ''; };
+  setText(elements['t2-vs22-apurado'], fmtVotos(m.perdaApurado, true));
+  sinal(elements['t2-vs22-apurado'], m.perdaApurado);
+  setText(elements['t2-vs22-apurado-sub'], `votos de margem: Lula ${m.perdaApurado < 0 ? 'perdeu' : 'ganhou'} isso em relação a 2022 nas zonas já lidas`);
+  setText(elements['t2-vs22-proj'], fmtVotos(m.perdaProjetada, true));
+  sinal(elements['t2-vs22-proj'], m.perdaProjetada);
+  setText(elements['t2-vs22-proj-sub'], `± ${fmtVotos(m.erroVotos)} votos de margem em relação a 2022, ao fim da apuração`);
+  setText(elements['t2-vs22-sobra'], fmtVotos(m.sobraProjetada, true));
+  sinal(elements['t2-vs22-sobra'], m.sobraProjetada);
+  setText(elements['t2-vs22-sobra-sub'], `± ${fmtVotos(m.erroVotos)} · vantagem de 2022: ${fmtVotos(m.vantagem2022, true)} · abaixo de zero, Lula perde`);
+
+  // medidor: 0 = nada perdido; a marca (80% da barra) = toda a vantagem de 2022 perdida (sobra zero); escala até 125%
+  const fill = elements['t2-vs22-meter-fill'], band = elements['t2-vs22-meter-band'];
+  if (m.vantagem2022 > 0) {
+    const ESC = 1.25, pos = (x) => Math.max(0, Math.min(1, x / ESC)) * 100;
+    const usado = -m.perdaProjetada / m.vantagem2022, e = m.erroVotos / m.vantagem2022;
+    fill.style.width = `${pos(usado)}%`;
+    band.style.left = `${pos(usado - e)}%`;
+    band.style.width = `${Math.max(0, pos(usado + e) - pos(usado - e))}%`;
+    fill.className = `t2-vs22-meter-fill${usado >= 1 ? ' is-over' : ''}`;
+    setText(elements['t2-vs22-meter-cap'], usado <= 0
+      ? `Projeção acima de 2022: nada da vantagem perdido (± ${fmtPp(e * 100)} da vantagem, pelo erro possível).`
+      : `Projeção: ${percentFormat.format(usado * 100)}% da vantagem de 2022 perdida (± ${percentFormat.format(e * 100)} p.p.); em 100% a sobra chega a zero.`);
+  } else {
+    setText(elements['t2-vs22-meter-cap'], 'Repetindo 2022 nessas zonas, Lula já não teria vantagem: o medidor não se aplica.');
+  }
+  if (out.chance && out.uncertainty && out.uncertainty.pp > 0) {
+    setText(elements['t2-vs22-chance'], `Chance de a sobra chegar a zero, isto é, de Lula perder: ${fmtChance(out.chance.F, out.chance.teto)}`);
+    vs22Show('t2-vs22-chance', true);
+  } else if (out.uncertainty && !(out.uncertainty.pp > 0)) {
+    setText(elements['t2-vs22-chance'], 'Apuração concluída: sem margem de projeção.');
+    vs22Show('t2-vs22-chance', true);
+  }
+  if (v.apurado) {
+    const d = v.apurado.dif * 100;
+    setText(elements['t2-vs22-fatia'], `Fatia de Lula no já apurado: ${fmtPct(v.apurado.lula)}, contra ${fmtPct(v.apurado.lula22)} dessas zonas em 2022 (${d >= 0 ? '+' : '−'}${fmtPp(Math.abs(d))}).`);
+    vs22Show('t2-vs22-fatia', true);
+  }
+  vs22Record(out.progress.electorateCountedPct, m.sobraProjetada, m.erroVotos);
+  vs22Chart();
 }
 
 /* Render LEVE (1 vez por segundo): faixa de conexão, cabeçalho, horários, contagem regressiva, alertas. */
@@ -666,49 +835,75 @@ async function checkElectionCode() {
   renderElectionCheck();
 }
 
-function stopRehearsal(restoreSavedState) {
+function stopRehearsal() {
   if (app.rehearsalTimer) clearInterval(app.rehearsalTimer);
   app.rehearsalTimer = null;
   app.rehearsal = false;
   app.rehearsalUnits = null;
   app.rehearsalStatus = null;
   elements['t2-rehearsal-label'].classList.add('hidden');
-  elements['t2-rehearsal'].textContent = 'Iniciar modo ensaio sintético';
-  app.state.reset();
-  if (restoreSavedState && app.savedStateBeforeRehearsal) app.state.importState(app.savedStateBeforeRehearsal);
-  app.savedStateBeforeRehearsal = null;
+  elements['t2-rehearsal-label'].textContent = REHEARSAL_LABEL;
+  elements['t2-rehearsal'].textContent = REHEARSAL_TEXT.atual;
+  elements['t2-rehearsal-2022'].textContent = REHEARSAL_TEXT.entre;
+  elements['t2-rehearsal'].classList.remove('hidden');
+  elements['t2-rehearsal-2022'].classList.remove('hidden');
+  if (app.realState) app.state = app.realState;
+  app.realState = null;
+  if (app.vs22HistReal) app.vs22Hist = app.vs22HistReal;
+  app.vs22HistReal = null;
+  // troca de estado: o cache de recompute() compara só a versão, que pode coincidir entre o estado real e o do ensaio
+  app.lastOutput = null;
+  app.lastVersion = -1;
 }
 
-function startRehearsal() {
+const REHEARSAL_TEXT = { atual: 'Ensaio sintético: 1º turno de 2026', entre: 'Ensaio sintético: entre 2022 e 2026' };
+const REHEARSAL_LABEL = 'ENSAIO — dados sintéticos; não são resultados eleitorais. Sem curva de chegada (os dados sintéticos não têm viés de chegada; faixa sem curva).';
+
+/* mode: 'atual' (verdade a partir do 1º turno de 2026) ou 'entre' (a mesma verdade puxada até a metade para o 2º turno de 2022 da zona). */
+function startRehearsal(mode) {
   if (app.rehearsal) {
-    stopRehearsal(true);
+    stopRehearsal();
     startPoller();
     return;
   }
   if (app.poller) app.poller.stop();
-  app.savedStateBeforeRehearsal = app.state.exportState();
-  app.state.reset();
+  // estado próprio do ensaio, SEM curva de chegada: os dados sintéticos são proporcionais dentro da zona (não há viés de chegada), e a
+  // curva de 2026 aplicada a eles criaria um erro que não existe (2T-1.4). O estado real fica intacto e volta no fim.
+  app.realState = app.state;
+  app.state = T2State.create(Object.assign({ curve: null }, app.stateCfg));
+  app.vs22HistReal = app.vs22Hist;
+  app.vs22Hist = [];
+  // troca de estado: o cache de recompute() compara só a versão, que pode coincidir entre o estado real e o do ensaio
+  app.lastOutput = null;
+  app.lastVersion = -1;
   app.rehearsalUnits = app.baseline.unidades.map((u) => ({
     id: u.id, uf: u.uf, mun: u.mun, zona: u.zona, x: u.x, E: u.E, secoes: u.secoes,
   }));
   const baselineById = new Map(app.baseline.unidades.map((unit) => [unit.id, unit]));
-  T2Sim.fakeSecondRound(app.rehearsalUnits, 123);
+  const entre = mode === 'entre' && app.fallback22;
+  T2Sim.fakeSecondRound(app.rehearsalUnits, 123, entre ? { pull: { ref: app.fallback22, lambda: 0.5 } } : undefined);
   app.rehearsal = true;
+  const truthL = T2Engine.validShares(T2Sim.truth(app.rehearsalUnits)).L;
+  elements['t2-rehearsal-label'].textContent = REHEARSAL_LABEL + (entre ? ' Modo: entre 2022 e 2026.' : ' Modo: 1º turno de 2026.');
   elements['t2-rehearsal-label'].classList.remove('hidden');
-  elements['t2-rehearsal'].textContent = 'Encerrar ensaio';
+  const ativo = entre ? 't2-rehearsal-2022' : 't2-rehearsal', outro = entre ? 't2-rehearsal' : 't2-rehearsal-2022';
+  elements[ativo].textContent = 'Encerrar ensaio';
+  elements[outro].classList.add('hidden');
   let rehearsalStep = 0;
   const advance = () => {
     rehearsalStep = Math.min(100, rehearsalStep + 1);
     const tau = rehearsalStep / 100;
-    T2Sim.stateAt(app.rehearsalUnits, tau).forEach((unit) => {
+    T2Sim.stateAt(app.rehearsalUnits, tau).forEach((unit, k) => {
       if (unit.y) {
         const baseline = baselineById.get(unit.id);
         const totalSections = baseline ? baseline.secoes || 0 : 0;
+        const full = app.rehearsalUnits[k].yFull.reduce((a, b) => a + b, 0);
+        const fz = full > 0 ? unit.y.reduce((a, b) => a + b, 0) / full : tau;   // fração apurada DESTA zona
         app.state.update(unit.id, {
           y: unit.y,
           E: unit.E,
           s: totalSections,
-          st: Math.round(totalSections * tau),
+          st: Math.round(totalSections * fz),
           ts: Date.now(),
         });
       }
@@ -719,7 +914,10 @@ function startRehearsal() {
       intervalMs: 30000, finalIntervalMs: 300000, startMs: 0, official: null,
     };
     refreshView();
-    if (rehearsalStep >= 100) clearInterval(app.rehearsalTimer);
+    if (rehearsalStep >= 100) {
+      clearInterval(app.rehearsalTimer);
+      elements['t2-rehearsal-label'].textContent = REHEARSAL_LABEL + ` Ensaio concluído: verdade sintética Lula ${fmtPct(truthL)} dos válidos.`;
+    }
   };
   advance();
   app.rehearsalTimer = setInterval(advance, 1500);
@@ -753,7 +951,7 @@ function onRefreshClick() {
   app.refreshNote = true;
   app.internalError = '';
   if (app.rehearsal) {
-    stopRehearsal(true);
+    stopRehearsal();
     startPoller();
   } else if (app.poller) {
     app.poller.refresh();
@@ -805,18 +1003,20 @@ function bindEvents() {
     app.electionNote = '';
     const changedElection = value !== app.electionCode;
     app.electionCode = value;
-    if (changedElection) app.state.reset();
+    if (changedElection) { app.state.reset(); app.vs22Hist = []; }
     try {
       localStorage.setItem('t2.eleicao', value);
       if (changedElection) {
         localStorage.removeItem('t2.state.v1');
+        localStorage.removeItem(VS22_HIST_KEY);
         localStorage.setItem('t2.state.election', value);
       }
     } catch (error) { /* armazenamento pode estar desativado */ }
     renderElectionCheck();
     startPoller();
   });
-  elements['t2-rehearsal'].addEventListener('click', startRehearsal);
+  elements['t2-rehearsal'].addEventListener('click', () => startRehearsal('atual'));
+  elements['t2-rehearsal-2022'].addEventListener('click', () => startRehearsal('entre'));
   document.addEventListener('pointerdown', requestWakeLock, { once: true, passive: true });
   document.addEventListener('visibilitychange', onVisibility);
   window.addEventListener('online', () => {
@@ -841,6 +1041,7 @@ async function init() {
   ]);
   app.baseline = baseline;
   app.prior = prior;
+  app.fallback22 = fallback && fallback.unidades ? fallback.unidades : null;
   // curva de chegada (2T-1.2): opcional; sem ela ou se for inválida, a projeção segue como no 2T-1.1
   try {
     const curve = await readLocalJson('data/t2/curva-2026-1t.json');
@@ -854,12 +1055,14 @@ async function init() {
   } catch (error) {
     app.electionCode = '6258';
   }
-  app.state = T2State.create({ engine: T2Engine, baseline, prior, fallback22: fallback.unidades, curve: app.curve });
+  app.stateCfg = { engine: T2Engine, baseline, prior, fallback22: fallback.unidades };
+  app.state = T2State.create(Object.assign({ curve: app.curve }, app.stateCfg));
   try {
     const saved = JSON.parse(localStorage.getItem('t2.state.v1') || 'null');
     const savedElection = localStorage.getItem('t2.state.election') || '6258';
     if (saved && savedElection === app.electionCode) app.state.importState(saved);
   } catch (error) { /* estado salvo pode estar vazio ou corrompido */ }
+  vs22LoadHist();
   app.queue = T2FetchQ.createFetchQueue({ maxRps: 15, maxConcurrent: 6 });
   bindEvents();
   startPoller();                              // primeiro render antes de qualquer rede
@@ -867,7 +1070,7 @@ async function init() {
   startTick();
 }
 
-globalThis.T2App = { app, renderData, renderLive, renderOfficial, refreshView, recompute, fmtPctFloor, fmtAge, tickPlugin, pluginStatusText };
+globalThis.T2App = { app, renderData, renderLive, renderOfficial, refreshView, recompute, fmtPctFloor, fmtAge, tickPlugin, pluginStatusText, startRehearsal };
 
 init().catch((error) => {
   elements['t2-status'].textContent = 'ERRO DE DADOS';

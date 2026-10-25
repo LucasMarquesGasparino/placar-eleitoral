@@ -10,8 +10,10 @@ MODOS
   --modo backtest   gera data/t2/dev/backtest-2022.json (linhas: L,F,D,B,N,A; x = 1T, yFull = 2T) a partir de 2022 (1º e 2º turnos)
   --modo curva      gera data/t2/curva-2026-1t.json (2T-1.2): POR SEÇÃO, a ordem de chegada dos resultados no 1º turno de 2026.
                     Para cada zona grava o desvio (composição das primeiras k seções apuradas − composição da zona) em 9 pontos.
-  --modo replay2022 gera data/t2/dev/replay-2022.json (por seção: zona, x do 1T22, y do 2T22, hora de chegada no 2T22) e
+  --modo replay     gera data/t2/dev/replay-2022.json (por seção: zona, x do 1T22, y do 2T22, hora de chegada no 2T22) e
                     data/t2/dev/curva-2022-1t.json (mesmo formato da curva de 2026, ordem do 1T22). Entrada do scripts/t2-replay.js.
+                    Outros anos com --cands (L e F primeiro) e --dia-turno2 (2T-1.4; ex. 2018 abaixo). replay2022 = apelido.
+                    Imprime e grava a estabilidade da ordem de chegada 1T x 2T dentro da zona (Spearman, 'ordem_1t_2t').
   --probe ARQ       imprime o cabeçalho e 3 linhas de um CSV/ZIP (use ANTES, para conferir os nomes das colunas)
   --selftest        cria CSVs sintéticos, roda os modos e confere os totais (teste de que o script funciona)
 
@@ -33,6 +35,9 @@ EXEMPLOS
       --base data/t2/base-2026-1t.json --out data/t2/curva-2026-1t.json
   python3 -I scripts/t2_build_base.py --modo replay2022 --votos ~/dl/votacao_secao_2022_BR.zip --detalhe ~/dl/detalhe_votacao_secao_2022.zip \
       --membro-detalhe detalhe_votacao_secao_2022_BRASIL.csv --out data/t2/dev/replay-2022.json --out-curva data/t2/dev/curva-2022-1t.json
+  python3 -I scripts/t2_build_base.py --modo replay --votos ~/dl/tse2018/votacao_secao_2018_BR.zip --detalhe ~/dl/tse2018/detalhe_votacao_secao_2018.zip \
+      --membro-detalhe detalhe_votacao_secao_2018_BR.csv --cands L=13,F=17,CIRO=12,ALCKMIN=45 --dia-turno2 28/10/2018 \
+      --out data/t2/dev/replay-2018.json --out-curva data/t2/dev/curva-2018-1t.json
 
 DEFINIÇÕES (iguais às do app ao vivo — NÃO mude sem mudar o adaptador do TSE):
   unidade   = "UF|mmmmm|zzzz"  (UF maiúscula; CD_MUNICIPIO = código do TSE com 5 dígitos; NR_ZONA com 4 dígitos)
@@ -496,14 +501,43 @@ def curva2026(args):
     print('gravado %s | %d zonas | escala %d | %.2f MB' % (args.out, len(saida['unidades']), saida['esc'], os.path.getsize(args.out) / 1e6))
 
 
-def replay2022(args):
-    """Ensaio com a ordem real: 1º turno (x) e 2º turno (y, hora de chegada) por seção, só seções presentes nos dois turnos."""
-    rows = ['L', 'F', 'D', 'B', 'N', 'A']
+def spearman_zonas(pares):
+    """pares: {zona: [(pos_1T, pos_2T), ...]} -> estabilidade da ordem de chegada dentro da zona entre os turnos.
+    Spearman (posições já sem empate: desempate pelo nº da seção) por zona com >= 3 seções; mediana e média ponderada pelo nº de seções."""
+    rhos = []
+    for lst in pares.values():
+        n = len(lst)
+        if n < 3:
+            continue
+        r1 = {p: i for i, p in enumerate(sorted(range(n), key=lambda j: lst[j][0]))}
+        r2 = {p: i for i, p in enumerate(sorted(range(n), key=lambda j: lst[j][1]))}
+        d2 = sum((r1[j] - r2[j]) ** 2 for j in range(n))
+        rhos.append((1 - 6.0 * d2 / (n * (n * n - 1)), n))
+    if not rhos:
+        return {'zonas': 0}
+    v = sorted(r for r, _ in rhos)
+    med = v[len(v) // 2] if len(v) % 2 else (v[len(v) // 2 - 1] + v[len(v) // 2]) / 2
+    pond = sum(r * n for r, n in rhos) / sum(n for _, n in rhos)
+    return {'zonas': len(rhos), 'mediana': round(med, 4), 'media_ponderada': round(pond, 4),
+            'fracao_positiva': round(sum(1 for r in v if r > 0) / len(v), 4)}
+
+
+def replay(args):
+    """Ensaio com a ordem real: 1º turno (x) e 2º turno (y, hora de chegada) por seção, só seções presentes nos dois turnos.
+    --cands (padrão L=13,F=22, isto é, 2022): candidatos do 1º turno com linha própria em x, na ordem; os dois primeiros têm de ser L e F
+    (os dois do 2º turno). Ex. 2018: L=13,F=17,CIRO=12,ALCKMIN=45."""
+    cands = [p.split('=') for p in (getattr(args, 'cands', None) or 'L=13,F=22').split(',')]
+    if [c[0] for c in cands[:2]] != ['L', 'F'] or len({c[1] for c in cands}) != len(cands):
+        raise SystemExit('--cands deve começar por L=<nº>,F=<nº> (os dois do 2º turno) e não repetir números')
+    rows = [c[0] for c in cands] + ['D', 'B', 'N', 'A']
+    nslot = len(cands)
+    ano = args.dia_turno2[-4:]
     invalidos = codigos_invalidos(getattr(args, 'invalidos', None))
-    slots = {'13': 0, '22': 1}
+    slots = {num: i for i, (_, num) in enumerate(cands)}
     s1, z1, st1 = ler_secoes(args.votos, args.detalhe, 1, slots, invalidos, args.membro_votos, args.membro_detalhe)
     print('1º turno: %d seções | stats %s' % (len(s1), st1))
-    s2, z2, st2 = ler_secoes(args.votos, args.detalhe, 2, slots, invalidos, args.membro_votos, args.membro_detalhe)
+    slots2 = {cands[0][1]: 0, cands[1][1]: 1}
+    s2, z2, st2 = ler_secoes(args.votos, args.detalhe, 2, slots2, invalidos, args.membro_votos, args.membro_detalhe)
     print('2º turno: %d seções | stats %s' % (len(s2), st2))
     t0 = segundos('%s %s' % (args.dia_turno2, args.hora_inicio))
     if t0 is None:
@@ -512,27 +546,35 @@ def replay2022(args):
     zonas = sorted({k[0] for k in ambas})
     zi = {z: i for i, z in enumerate(zonas)}
     secoes, por_zona1 = [], defaultdict(list)
-    tot_y = [0] * 5
+    tot_y, tot_x = [0] * 5, [0] * len(rows)
+    pares = defaultdict(list)
     for k in ambas:
         r1, r2 = s1[k], s2[k]
-        x, y = x_secao(r1, 2), y_secao(r2)
+        x, y = x_secao(r1, nslot), y_secao(r2)
         t2 = r2[0] - t0 if r2[0] != SEM_HORA else SEM_HORA
         secoes.append([zi[k[0]]] + x + y + [t2])
         por_zona1[k[0]].append((r1[0], k[1], x))
+        pares[k[0]].append(((r1[0], k[1]), (r2[0], k[1])))
         for i in range(5):
             tot_y[i] += y[i]
+        for i in range(len(rows)):
+            tot_x[i] += x[i]
     for z in por_zona1:
         por_zona1[z].sort(key=lambda a: (a[0], a[1]))
+    ordem = spearman_zonas(pares)
+    print('ordem de chegada 1T x 2T dentro da zona (Spearman): %s' % ordem)
+    val1 = sum(tot_x[:nslot + 1])
+    print('1º turno (seções nos dois turnos), %% dos válidos: %s' % ', '.join('%s %.2f' % (r, 100.0 * tot_x[i] / max(1, val1)) for i, r in enumerate(rows[:nslot + 1])))
     saida = {'v': 1, 'gerado_em': datetime.datetime.now().isoformat(timespec='seconds'),
-             'fonte': 'TSE dados abertos 2022 (Presidente): x = 1º turno; y e t2 = 2º turno de %s; t2 em segundos desde %s' % (args.dia_turno2, args.hora_inicio),
+             'fonte': 'TSE dados abertos %s (Presidente): x = 1º turno; y e t2 = 2º turno de %s; t2 em segundos desde %s' % (ano, args.dia_turno2, args.hora_inicio),
              'rows': rows, 'colunas': ['zona'] + ['x_' + r for r in rows] + ['y_' + r for r in ['L', 'F', 'B', 'N', 'A']] + ['t2'],
-             'zonas': zonas, 'secoes': secoes}
+             'zonas': zonas, 'secoes': secoes, 'ordem_1t_2t': ordem}
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, 'w', encoding='utf-8') as f:
         json.dump(saida, f, ensure_ascii=False, separators=(',', ':'))
-    print('gravado %s | %d zonas | %d seções | %.1f MB | 2T: Lula %d, Bolsonaro %d (%.2f%% dos válidos)' % (
+    print('gravado %s | %d zonas | %d seções | %.1f MB | 2T: L %d, F %d (L %.2f%% dos válidos)' % (
         args.out, len(zonas), len(secoes), os.path.getsize(args.out) / 1e6, tot_y[0], tot_y[1], 100.0 * tot_y[0] / max(1, tot_y[0] + tot_y[1])))
-    curva, tam = montar_curva(por_zona1, rows, 'ordem de chegada do 1º turno de 2022 (DT_PRIM_TOT_PARCIAL_HOR_TSE), seções presentes nos dois turnos')
+    curva, tam = montar_curva(por_zona1, rows, 'ordem de chegada do 1º turno de %s (DT_PRIM_TOT_PARCIAL_HOR_TSE), seções presentes nos dois turnos' % ano)
     os.makedirs(os.path.dirname(os.path.abspath(args.out_curva)), exist_ok=True)
     with open(args.out_curva, 'w', encoding='utf-8') as f:
         json.dump(curva, f, ensure_ascii=False, separators=(',', ':'))
@@ -683,7 +725,7 @@ def selftest():
     assert pequeno['esc'] == 1000 and all(abs(v) <= 1000 for cz in pequeno['unidades'].values() for d in cz['d'] for v in d)
     ns4 = argparse.Namespace(votos=fv, detalhe=fd, membro_votos=None, membro_detalhe=None, invalidos='28', dia_turno2='25/10/2026', hora_inicio='17:00:00',
                              out=os.path.join(tmp, 'replay.json'), out_curva=os.path.join(tmp, 'curva22.json'))
-    replay2022(ns4)
+    replay(ns4)
     rp, c22 = json.load(open(ns4.out)), json.load(open(ns4.out_curva))
     assert rp['rows'] == ['L', 'F', 'D', 'B', 'N', 'A'] and len(rp['zonas']) == 18 and len(rp['secoes']) == 90 and c22['rows'] == rp['rows']
     xz = defaultdict(lambda: [0] * 6)
@@ -695,19 +737,38 @@ def selftest():
     for u in b['unidades']:
         assert xz[u['id']] == u['x'], (u['id'], xz[u['id']], u['x'])                                 # x do 1T por seção soma a zona do backtest
     assert all(c22['unidades'][z]['n'] == 5 for z in rp['zonas'])
+    o = rp['ordem_1t_2t']
+    assert o['zonas'] == 18 and -1 <= o['mediana'] <= 1 and -1 <= o['media_ponderada'] <= 1, o
+    assert spearman_zonas({'a': [(1, 1), (2, 2), (3, 3)], 'b': [(1, 3), (2, 2), (3, 1)], 'c': [(1, 1)]}) == \
+        {'zonas': 2, 'mediana': 0.0, 'media_ponderada': 0.0, 'fracao_positiva': 0.5}
+    # replay com mais candidatos do 1º turno (2T-1.4): x tem linhas próprias para CURY e SANTOS e soma o mesmo que o x de 6 linhas
+    ns5 = argparse.Namespace(**dict(vars(ns4), cands='L=13,F=22,CURY=70,SANTOS=14', out=os.path.join(tmp, 'replay8.json'),
+                                    out_curva=os.path.join(tmp, 'curva8.json')))
+    replay(ns5)
+    rp8, c8 = json.load(open(ns5.out)), json.load(open(ns5.out_curva))
+    assert rp8['rows'] == ['L', 'F', 'CURY', 'SANTOS', 'D', 'B', 'N', 'A'] and c8['rows'] == rp8['rows'] and len(rp8['secoes']) == 90
+    for a6, a8 in zip(rp['secoes'], rp8['secoes']):
+        assert len(a8) == 1 + 8 + 5 + 1 and a8[0] == a6[0] and a8[1:3] == a6[1:3] and sum(a8[3:6]) == a6[3]
+        assert a8[6:9] == a6[4:7] and a8[9:] == a6[7:], (a6, a8)                                   # B, N, A, y e t2 iguais
+    assert any(a8[3] > 0 for a8 in rp8['secoes']) and all(len(c8['unidades'][z]['d'][0]) == 8 for z in rp8['zonas'])
+    try:
+        replay(argparse.Namespace(**dict(vars(ns5), cands='F=22,L=13')))
+        raise AssertionError('--cands sem L,F primeiro deveria falhar')
+    except SystemExit:
+        pass
     print('SELFTEST OK')
 
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--modo', choices=['base2026', 'backtest', 'curva', 'replay2022'])
+    ap.add_argument('--modo', choices=['base2026', 'backtest', 'curva', 'replay', 'replay2022'])
     ap.add_argument('--votos', nargs='+'), ap.add_argument('--detalhe', nargs='+'), ap.add_argument('--out')
     ap.add_argument('--membro-votos', dest='membro_votos'), ap.add_argument('--membro-detalhe', dest='membro_detalhe')
     ap.add_argument('--cands'), ap.add_argument('--invalidos', help='números de candidaturas sem votos válidos, separados por vírgula'), ap.add_argument('--esperado'), ap.add_argument('--force', action='store_true')
     ap.add_argument('--base', help='(curva) base-2026-1t.json para conferir a soma das seções por zona')
-    ap.add_argument('--out-curva', dest='out_curva', default='data/t2/dev/curva-2022-1t.json', help='(replay2022) curva do 1T22')
-    ap.add_argument('--dia-turno2', dest='dia_turno2', default='30/10/2022', help='(replay2022) dia do 2º turno, dd/mm/aaaa')
-    ap.add_argument('--hora-inicio', dest='hora_inicio', default='17:00:00', help='(replay2022) t=0 do ensaio (início da apuração em Brasília)')
+    ap.add_argument('--out-curva', dest='out_curva', default='data/t2/dev/curva-2022-1t.json', help='(replay) curva do 1T22')
+    ap.add_argument('--dia-turno2', dest='dia_turno2', default='30/10/2022', help='(replay) dia do 2º turno, dd/mm/aaaa')
+    ap.add_argument('--hora-inicio', dest='hora_inicio', default='17:00:00', help='(replay) t=0 do ensaio (início da apuração em Brasília)')
     ap.add_argument('--probe'), ap.add_argument('--membro')
     ap.add_argument('--selftest', action='store_true')
     a = ap.parse_args()
@@ -721,7 +782,7 @@ if __name__ == '__main__':
         backtest(a)
     elif a.modo == 'curva':
         curva2026(a)
-    elif a.modo == 'replay2022':
-        replay2022(a)
+    elif a.modo in ('replay', 'replay2022'):         # replay2022 = apelido (padrões de 2022)
+        replay(a)
     else:
         ap.print_help()

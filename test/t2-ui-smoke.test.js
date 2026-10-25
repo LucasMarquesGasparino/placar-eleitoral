@@ -162,7 +162,7 @@ test('tela do 2T: faixa calibrada "± p.p.", "Indefinido" quando 50% cabe na fai
     T.renderData(fake(0.512, 1.5), status);
     assert.ok($('t2-lead').textContent.startsWith('Indefinido: diferença menor que o erro típico'), $('t2-lead').textContent);
     assert.ok($('t2-band').textContent.includes('Lula 51,20% ± 1,50 p.p.'), $('t2-band').textContent);
-    assert.ok($('t2-band').textContent.includes('ordem real de 2022'));
+    assert.ok($('t2-band').textContent.includes('ordem real de 2018 e 2022') && $('t2-band').textContent.includes('superestimou o candidato do PT'));
     T.renderData(fake(0.53, 0.75), status);
     assert.ok($('t2-lead').textContent.startsWith('Lula à frente por'), $('t2-lead').textContent);
     T.renderData(fake(0.47, 0.2), status);
@@ -171,7 +171,10 @@ test('tela do 2T: faixa calibrada "± p.p.", "Indefinido" quando 50% cabe na fai
     assert.ok($('t2-band').textContent.includes('sem margem de projeção'));
     T.renderData(out, status);
     const arr = $('t2-diag-arrival').textContent;
-    assert.ok(arr.includes('Curva de chegada: carregada') && arr.includes('α=0.5') && arr.includes('aplicada em 0 zonas') && arr.includes('Faixa entre métodos'), arr);
+    assert.ok(arr.includes('Curva de chegada: carregada') && arr.includes('α=0.8 (rampa até 30% da zona)') && arr.includes('aplicada em 0 zonas') && arr.includes('Faixa entre métodos'), arr);
+    // 2T-1.2.1: a classe de 1% usada na faixa aparece nos diagnósticos (prévia: 0% apurado => classe 0–1%)
+    assert.ok(out.uncertainty.classe && out.uncertainty.classe.de === 0 && out.uncertainty.classe.ate === 0.01, JSON.stringify(out.uncertainty));
+    assert.ok(arr.includes('Faixa calibrada: ±11,55 p.p. na classe 0–1% apurado (2× o maior erro nos ensaios com a ordem real de 2018 e 2022') && arr.includes('superestimando o candidato do PT'), arr);
     assert.equal($('t2-diag-plugin').textContent, 'Plugin: nenhum.');
   } finally { ctx.T2App.app.poller.stop(); }
 });
@@ -204,4 +207,86 @@ test('tela do 2T: com T2Plugin chama init, mostra status() e isola erro/lentidã
     await new Promise((r) => setTimeout(r, 200));                                     // passou do limite: libera e registra
     assert.equal(T.app.pluginBusy, false); assert.ok(/8 s|passou/.test(T.app.pluginError));
   } finally { ctx.T2App.app.poller.stop(); }
+});
+
+test('tela do 2T (2T-1.4): contador "contra 2022" e os dois ensaios (1º turno de 2026 / entre 2022 e 2026)', async () => {
+  const { ctx } = await boot();
+  const T = ctx.T2App, $ = (id) => ctx.document.getElementById(id);
+  try {
+    const v = T.app.lastOutput.vs2022;
+    assert.ok(v && v.cobertura > 0.95 && v.apurado === null, JSON.stringify(v && v.cobertura));
+    assert.ok(Math.abs(v.restante.precisa - 0.5) < 1e-12 && v.restante.lula22 > 0.5 && v.restante.lula22 < 0.52, String(v.restante.lula22));
+    // painel próprio (2T-1.4.1): visível antes da apuração, com a vantagem de 2022 e o "no que falta"; números do apurado em branco
+    assert.equal($('t2-vs22-state').textContent, 'Aguardando a apuração');
+    assert.ok(/vantagem de \+\d/.test($('t2-vs22-intro').textContent), $('t2-vs22-intro').textContent);
+    const falta = $('t2-vs22-falta').textContent;
+    assert.ok(!$('t2-vs22-falta').classList.contains('hidden') && falta.startsWith('No que falta: nessas zonas Lula teve') && falta.includes('pode cair até'), falta);
+    assert.equal($('t2-vs22-apurado').textContent, '—');
+    assert.ok($('t2-vs22-chance').classList.contains('hidden') && $('t2-vs22-chart').classList.contains('hidden'));
+    assert.equal(T.app.vs22Hist.length, 0);
+    assert.equal(T.app.lastOutput.chance, null);
+    assert.ok(!$('t2-band').textContent.includes('chance'), 'sem apurado não há chance');
+    // com apurado: chance na faixa e no contador
+    const o2 = Object.assign({}, T.app.lastOutput, { chance: { L: 0.873, F: 0.127, sigmaPP: 0.4 },
+      vs2022: Object.assign({}, v, { apurado: { lula: 0.49, lula22: 0.5, dif: -0.01 },
+        margem: { vantagem2022: 2.1e6, perdaApurado: -312000, perdaProjetada: -1.6e6, sobraProjetada: 0.5e6, erroVotos: 0.4e6 } }) });
+    T.renderData(o2, { phase: 'live', lastOkTs: Date.now(), errors: [], intervalMs: 30000 });
+    assert.ok($('t2-band').textContent.includes('chance de vitória: Lula 87%, Flávio 13%'), $('t2-band').textContent);
+    assert.ok($('t2-vs22-intro').textContent.includes('vantagem de +2,10 mi votos'));
+    assert.equal($('t2-vs22-state').textContent, 'Ao vivo');
+    assert.equal($('t2-vs22-apurado').textContent, '−312 mil');
+    assert.ok($('t2-vs22-apurado-sub').textContent.includes('Lula perdeu isso'));
+    assert.equal($('t2-vs22-proj').textContent, '−1,60 mi');
+    assert.ok($('t2-vs22-proj-sub').textContent.startsWith('± 400 mil'));
+    assert.equal($('t2-vs22-sobra').textContent, '+500 mil');
+    assert.equal($('t2-vs22-sobra').className, 't2-leader-l');
+    assert.ok($('t2-vs22-sobra-sub').textContent.includes('vantagem de 2022: +2,10 mi'));
+    assert.equal($('t2-vs22-chance').textContent, 'Chance de a sobra chegar a zero, isto é, de Lula perder: 13%');
+    assert.ok($('t2-vs22-fatia').textContent.includes('(−1,00 p.p.)'));
+    // medidor: 1,6/2,1 = 76,19% perdido -> 60,95% da barra (escala 125%); faixa ± 0,4/2,1
+    assert.ok(Math.abs(parseFloat($('t2-vs22-meter-fill').style.width) - 60.952) < 0.01, $('t2-vs22-meter-fill').style.width);
+    assert.ok($('t2-vs22-meter-cap').textContent.includes('76,19% da vantagem de 2022 perdida'), $('t2-vs22-meter-cap').textContent);
+    assert.equal(T.app.vs22Hist.length, 1);
+    assert.ok(JSON.parse(ctx.localStorage.getItem('t2-vs22-hist')).pts.length === 1, 'histórico real salvo');
+    T.renderData(Object.assign({}, o2, { chance: { L: 0.9999, F: 0.0001, sigmaPP: 0.1 } }), { phase: 'live', lastOkTs: Date.now(), errors: [], intervalMs: 30000 });
+    assert.ok($('t2-band').textContent.includes('Lula > 99%, Flávio < 1%'));
+    T.renderData(Object.assign({}, o2, { chance: { L: 0.95, F: 0.05, sigmaPP: 0.1, teto: 0.95 } }), { phase: 'live', lastOkTs: Date.now(), errors: [], intervalMs: 30000 });
+    assert.ok($('t2-band').textContent.includes('Lula > 95%, Flávio < 5%'), $('t2-band').textContent);
+    assert.ok($('t2-vs22-chance').textContent.includes('de Lula perder: < 5%'));
+    const real = T.app.state;
+    T.startRehearsal('entre');
+    assert.equal(T.app.rehearsal, true);
+    assert.ok($('t2-rehearsal-label').textContent.includes('Modo: entre 2022 e 2026'), $('t2-rehearsal-label').textContent);
+    assert.equal($('t2-rehearsal-2022').textContent, 'Encerrar ensaio');
+    assert.ok($('t2-rehearsal').classList.contains('hidden'));
+    assert.notEqual(T.app.state, real, 'o ensaio usa um estado próprio');
+    assert.equal(T.app.state.compute().diagnostics.curveLoaded, false, 'ensaio sem curva de chegada (dados sintéticos sem viés de chegada)');
+    // o ensaio começa com histórico próprio e vazio e sem a saída em cache do estado real (no 1º passo ainda não há zona com dados)
+    assert.equal(T.app.vs22Hist.length, 0, 'histórico próprio do ensaio');
+    assert.equal(T.app.lastOutput.progress.electorateCountedPct, T.app.state.compute().progress.electorateCountedPct, 'saída do estado do ensaio, não a do real');
+    assert.equal(JSON.parse(ctx.localStorage.getItem('t2-vs22-hist')).pts.length, 1, 'o ensaio não grava no histórico real');
+    const st = { phase: 'live', lastOkTs: Date.now(), errors: [], intervalMs: 30000 };
+    T.renderData(Object.assign({}, o2, { progress: Object.assign({}, o2.progress, { electorateCountedPct: 0.3 }) }), st);
+    T.renderData(Object.assign({}, o2, { progress: Object.assign({}, o2.progress, { electorateCountedPct: 0.6 }),
+      vs2022: Object.assign({}, o2.vs2022, { margem: Object.assign({}, o2.vs2022.margem, { sobraProjetada: -0.2e6 }) }) }), st);
+    const svg = $('t2-vs22-chart').innerHTML;
+    assert.ok(!$('t2-vs22-chart').classList.contains('hidden') && svg.startsWith('<svg') && svg.includes('<polyline') && svg.includes('stroke="#206592"'), svg.slice(0, 200));
+    assert.equal(JSON.parse(ctx.localStorage.getItem('t2-vs22-hist')).pts.length, 1);
+    const lEntre = T.app.rehearsalUnits.reduce((a, u) => a + u.yFull[0], 0);
+    T.startRehearsal('entre');                                                   // encerra
+    assert.equal(T.app.rehearsal, false);
+    assert.equal(T.app.state, real, 'o estado real volta intacto');
+    assert.equal(T.app.vs22Hist.length, 1, 'o histórico real volta intacto');
+    assert.equal(T.app.lastOutput.vs2022.margem.perdaApurado, null, 'ao sair do ensaio a tela volta à saída do estado real (sem dados), não à do ensaio');
+    assert.equal($('t2-vs22-state').textContent, 'Aguardando a apuração');
+    assert.equal($('t2-rehearsal-2022').textContent, 'Ensaio sintético: entre 2022 e 2026');
+    assert.equal($('t2-rehearsal').textContent, 'Ensaio sintético: 1º turno de 2026');
+    assert.ok(!$('t2-rehearsal').classList.contains('hidden'));
+    T.startRehearsal('atual');
+    assert.ok($('t2-rehearsal-label').textContent.includes('Modo: 1º turno de 2026'));
+    const lAtual = T.app.rehearsalUnits.reduce((a, u) => a + u.yFull[0], 0);
+    assert.notEqual(lAtual, lEntre, 'as duas verdades sintéticas diferem');
+    T.startRehearsal('atual');
+    assert.equal(T.app.rehearsal, false);
+  } finally { if (T.app.rehearsalTimer) clearInterval(T.app.rehearsalTimer); T.app.poller.stop(); }
 });

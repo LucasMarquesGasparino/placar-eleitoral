@@ -10,6 +10,7 @@ Dentro de cada zona, as seções que chegam primeiro não são representativas d
 |---|---|
 | 2T-1.1 (zona inteira) | 0,36 |
 | Curva de chegada α=0,5 (2T-1.2) | 0,10 |
+| Curva de chegada α=0,8 em rampa (2T-1.3) | 0,05 |
 | Zona + saber quais seções (este app) | 0,05 |
 | Motor por seção (referência) | 0,04 |
 
@@ -100,9 +101,9 @@ Testes: `node --test test/t2-observador.test.js test/t2-pertenca.test.js test/t2
 ## B4: roteiro depois da eleição
 
 1. Quando o TSE publicar `votacao_secao_2026` e `detalhe_votacao_secao_2026` do 2T nos Dados Abertos, baixar e conferir o cabeçalho com `t2_build_base.py --probe`.
-2. Rodar `scripts/t2-replay.js` sobre 2026, com o horário real de chegada de cada seção (`DT_PRIM_TOT_PARCIAL_HOR_TSE`): 2T-1.1 (α=0), 2T-1.2 (α=0,5) e pertença (xc exato). Comparar o erro médio absoluto de 17:30 a 19:30 com a tabela acima.
+2. Rodar `scripts/t2-replay.js` sobre 2026, com o horário real de chegada de cada seção (`DT_PRIM_TOT_PARCIAL_HOR_TSE`): 2T-1.1 (α=0), 2T-1.2 (α=0,5 fixo), 2T-1.3 (α=0,8 em rampa) e pertença (xc exato). Comparar o erro médio absoluto de 17:30 a 19:30 com a tabela acima.
 3. Cruzar com o registro da tela do app (série hora, % apurado, projeção, faixa) e com o `observador-2t.jsonl`: em que horário o `cs` teria permitido pertença e qual foi a cobertura (zonas com `xc` ÷ zonas parciais) em cada UF.
-4. Recalibrar α e o envelope da faixa (A3) com a ordem real do 2T de 2026.
+4. Recalibrar α, a rampa e o envelope da faixa (A3) com a ordem real do 2T de 2026.
 5. Reajustar `lambda0` e `kappa*`, se for o caso, com validação cruzada por grupos de UF.
 6. Decidir para 2028 e 2030: se o `cs` vier ao vivo com defasagem de 10 min ou menos, manter o modo pertença como padrão; senão, ficar com a curva de chegada.
 7. B3 (decodificador de BU, só para auditoria) segue fora do escopo.

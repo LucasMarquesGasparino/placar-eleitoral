@@ -130,10 +130,14 @@
 
   /* ENSAIO "1T como 2T": dada uma lista de unidades REAIS {id,uf,mun,x:[10],E}, gera uma verdade oculta do 2º turno
    * (yFull) aplicando M_TRUE + efeitos locais (UF, município, zona) e um cronograma de apuração. Muta e devolve a lista.
-   * Serve para ensaiar tela + motor em escala real, sem dados do 2T. Linhas de x devem ser as 10 linhas padrão (ROWS). */
+   * Serve para ensaiar tela + motor em escala real, sem dados do 2T. Linhas de x devem ser as 10 linhas padrão (ROWS).
+   * effects.pull = { ref: {id: [L,F,B,N,A]}, lambda } (2T-1.4, ensaio "entre 2022 e 2026"): a parte estrutural (M_TRUE sobre o 1T) é
+   * puxada para o 2º turno de 2022 da própria zona, base = (1−λ)·M_TRUE·x + λ·2022; os efeitos locais e o ruído continuam por cima,
+   * então a verdade não é igual a nenhuma das duas. Zona sem 2022: só M_TRUE. */
   function fakeSecondRound(units, seed, effects) {
     var r = rng(seed || 1), ef = effects || {}, sdUf = ef.sdUf === undefined ? 0.012 : ef.sdUf,
         sdMun = ef.sdMun === undefined ? 0.010 : ef.sdMun, sdZona = ef.sdZona === undefined ? 0.004 : ef.sdZona;
+    var pull = ef.pull && ef.pull.ref ? ef.pull : null, lam = pull ? Math.min(1, Math.max(0, Number(pull.lambda === undefined ? 0.5 : pull.lambda))) : 0;
     var dUf = {}, dMun = {}, i, j;
     units.forEach(function (u) {
       if (!dUf[u.uf]) dUf[u.uf] = zeroSum5(r, sdUf);
@@ -141,6 +145,8 @@
       if (!dMun[km]) dMun[km] = zeroSum5(r, sdMun);
       var dz = zeroSum5(r, sdZona), sx = sum(u.x), base = [0, 0, 0, 0, 0];
       for (i = 0; i < 10; i++) for (j = 0; j < 5; j++) base[j] += (u.x[i] / sx) * M_TRUE[i][j];
+      var r22 = pull && pull.ref[u.id], s22 = r22 ? sum(r22) : 0;
+      if (s22 > 0) for (j = 0; j < 5; j++) base[j] = (1 - lam) * base[j] + lam * r22[j] / s22;
       var rate = base.map(function (v, k) { return Math.max(0, v + dUf[u.uf][k] + dMun[km][k] + dz[k] + gauss(r) * Math.sqrt(Math.max(v * (1 - v), 1e-6) / u.E)); });
       var sr = sum(rate);
       u.yFull = rate.map(function (v) { return v / sr * u.E; });

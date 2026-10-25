@@ -100,9 +100,35 @@
         </div>
         <div class="t2-outcome-lines">
           <p id="t2-lead" class="t2-lead">Calculando a projeção…</p>
-          <p id="t2-band" class="t2-band">Lula — ± — <span>(erro típico do método no ensaio com a ordem real de 2022)</span></p>
+          <p id="t2-band" class="t2-band">Lula — ± — <span>(faixa: 2× o maior erro nos ensaios com a ordem real de 2018 e 2022)</span></p>
         </div>
         <p class="prediction-note t2-disclaimer"><strong>Projeção estatística. Não é resultado oficial.</strong> Fonte dos dados: TSE.</p>
+      </section>
+
+      <section id="t2-vs22-panel" class="prediction-panel t2-panel t2-vs22-panel" aria-labelledby="t2-vs22-title">
+        <div class="panel-heading">
+          <div><p class="eyebrow">CONTRA O 2º TURNO DE 2022</p><h2 id="t2-vs22-title">Quanto da vantagem de 2022 Lula já perdeu</h2></div>
+          <span id="t2-vs22-state" class="order-note">Aguardando a apuração</span>
+        </div>
+        <div class="t2-vs22-content">
+          <p id="t2-vs22-intro" class="t2-vs22-intro">Se cada zona repetisse a fatia de Lula no 2º turno de 2022, com os votos válidos de hoje, ele teria uma vantagem de — votos. O contador mostra quanto disso ele vai perdendo.</p>
+          <div class="t2-vs22-grid">
+            <div class="t2-vs22-num"><span class="t2-vs22-label">Já apurado</span><strong id="t2-vs22-apurado">—</strong><span id="t2-vs22-apurado-sub" class="t2-vs22-sub">nenhuma zona lida ainda</span></div>
+            <div class="t2-vs22-num"><span class="t2-vs22-label">Projeção ao fim</span><strong id="t2-vs22-proj">—</strong><span id="t2-vs22-proj-sub" class="t2-vs22-sub">votos de margem em relação a 2022</span></div>
+            <div class="t2-vs22-num"><span class="t2-vs22-label">Sobra da vantagem</span><strong id="t2-vs22-sobra">—</strong><span id="t2-vs22-sobra-sub" class="t2-vs22-sub">abaixo de zero, Lula perde</span></div>
+          </div>
+          <div class="t2-vs22-meter" role="img" aria-label="Parte da vantagem de 2022 já consumida pela projeção">
+            <span id="t2-vs22-meter-band" class="t2-vs22-meter-band"></span><span id="t2-vs22-meter-fill" class="t2-vs22-meter-fill"></span><span class="t2-vs22-meter-zero"></span>
+          </div>
+          <div class="t2-vs22-meter-labels"><span>nada perdido</span><span>sobra zero</span></div>
+          <p id="t2-vs22-meter-cap" class="t2-vs22-cap">—</p>
+          <p id="t2-vs22-chance" class="t2-vs22-chance hidden"></p>
+          <p id="t2-vs22-falta" class="t2-vs22-line hidden"></p>
+          <p id="t2-vs22-fatia" class="t2-vs22-line hidden"></p>
+          <div id="t2-vs22-chart" class="t2-vs22-chart hidden" role="img" aria-label="Evolução da sobra projetada conforme a apuração"></div>
+          <p id="t2-vs22-chart-cap" class="t2-vs22-cap hidden">Evolução: sobra projetada (linha) e erro possível (faixa), pelo % apurado. Abaixo da linha tracejada, Lula perde.</p>
+          <p class="t2-vs22-cap">No começo da noite o já apurado tende a parecer pior: as primeiras seções de cada zona são menos lulistas. Erro possível = a faixa calibrada da projeção. Só informativo: o 2º turno de 2022 não entra na projeção.</p>
+        </div>
       </section>
 
       <section class="prediction-panel t2-panel" aria-labelledby="t2-counted-title">
@@ -181,8 +207,9 @@
             <p id="t2-diag-plugin">Plugin: —</p>
           </div>
           <p id="t2-diag-errors" class="t2-diag-errors"></p>
-          <button id="t2-rehearsal" class="refresh-button t2-rehearsal-button" type="button">Iniciar modo ensaio sintético</button>
-          <p class="t2-diag-caption">O ensaio usa votos sintéticos sobre a base das zonas de 2026; ele não consulta o resultado de 2º turno.</p>
+          <button id="t2-rehearsal" class="refresh-button t2-rehearsal-button" type="button">Ensaio sintético: 1º turno de 2026</button>
+          <button id="t2-rehearsal-2022" class="refresh-button t2-rehearsal-button" type="button">Ensaio sintético: entre 2022 e 2026</button>
+          <p class="t2-diag-caption">Os ensaios usam votos sintéticos sobre a base das zonas de 2026; não consultam o resultado do 2º turno. "1º turno de 2026": a verdade sai da composição do 1º turno de cada zona. "Entre 2022 e 2026": a mesma verdade, puxada até a metade do caminho para o 2º turno de 2022 da própria zona, com os mesmos efeitos locais por cima.</p>
         </div>
       </details>
 

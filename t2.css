@@ -35,6 +35,28 @@
 .t2-now-pct { margin: 0; color: #53656d; font-size: 12px; font-weight: 700; }
 .t2-forneed { margin: 11px 0 0; padding: 10px 12px; border-radius: 9px; background: #f5f8f6; color: #53656d; font-size: 11px; line-height: 1.5; }
 .t2-section-note { padding-top: 12px; }
+/* painel "contra 2022" (2T-1.4.1) */
+.t2-vs22-content { padding: 16px 20px 16px; }
+.t2-vs22-intro { margin: 0 0 13px; color: #53656d; font-size: 12px; line-height: 1.5; }
+.t2-vs22-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+.t2-vs22-num { display: flex; flex-direction: column; gap: 4px; padding: 11px 12px; border-radius: 10px; background: #f5f8f6; }
+.t2-vs22-label { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; }
+.t2-vs22-num strong { color: var(--ink); font: 800 24px/1.1 'Manrope', sans-serif; font-variant-numeric: tabular-nums; }
+.t2-vs22-sub { color: #6b7b82; font-size: 10px; line-height: 1.4; }
+.t2-vs22-meter { position: relative; height: 12px; margin: 15px 0 4px; overflow: hidden; border-radius: 999px; background: #edf1ef; }
+.t2-vs22-meter-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; border-radius: inherit; background: linear-gradient(90deg,#d99a3c,#ba3e32); transition: width .35s ease; }
+.t2-vs22-meter-fill.is-over { background: #a52f2f; }
+.t2-vs22-meter-band { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: rgba(32,101,146,.22); }
+.t2-vs22-meter-zero { position: absolute; top: 0; bottom: 0; left: 80%; width: 2px; background: #192a33; }
+.t2-vs22-meter-labels { position: relative; height: 14px; color: var(--muted); font-size: 9px; font-weight: 700; }
+.t2-vs22-meter-labels span:first-child { position: absolute; left: 0; }
+.t2-vs22-meter-labels span:last-child { position: absolute; left: 80%; transform: translateX(-50%); white-space: nowrap; }
+.t2-vs22-cap { margin: 6px 0 0; color: #7b8a90; font-size: 10px; line-height: 1.5; }
+.t2-vs22-chance { margin: 11px 0 0; color: var(--ink); font-size: 13px; font-weight: 800; }
+.t2-vs22-line { margin: 8px 0 0; color: #53656d; font-size: 11px; line-height: 1.5; }
+.t2-vs22-chart { margin-top: 13px; padding: 8px 8px 4px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.t2-vs22-chart svg { display: block; width: 100%; height: 150px; }
+.t2-vs22-axis { display: flex; justify-content: space-between; margin-top: 3px; color: var(--muted); font-size: 9px; }
 .t2-migration-table { min-width: 760px; }
 .t2-migration-table th, .t2-migration-table td { padding-right: 12px; padding-left: 12px; white-space: nowrap; }
 .t2-migration-table th:first-child, .t2-migration-table td:first-child { padding-left: 20px; }
@@ -133,6 +155,8 @@
 .t2-lag-note { margin: 10px 0 0; padding: 9px 12px; border-radius: 9px; background: #fff6e5; color: #805316; font-size: 11px; line-height: 1.5; }
 
 @media (max-width: 650px) {
+  .t2-vs22-grid { grid-template-columns: 1fr; }
+  .t2-vs22-content { padding: 14px 14px 14px; }
   .t2-off-body { padding: 12px 14px 14px; }
   .t2-off-cand strong { font-size: clamp(24px, 8vw, 30px); }
   .t2-header-actions .refresh-button { min-height: 44px; min-width: 44px; }

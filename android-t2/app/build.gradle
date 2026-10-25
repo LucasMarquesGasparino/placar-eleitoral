@@ -27,8 +27,8 @@ android {
         applicationId 'br.com.lucasgasparino.placar.t2'
         minSdk 23
         targetSdk 34
-        versionCode 3
-        versionName '2T-1.2'
+        versionCode 7
+        versionName '2T-1.4.1'
         manifestPlaceholders = [appLabel: 'Placar 2T', startPage: 't2.html']
     }
 

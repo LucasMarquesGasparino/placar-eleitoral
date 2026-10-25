@@ -47,6 +47,58 @@ test('forNeed: fórmula do "para virar"', () => {
   assert.equal(f.leader === 'L', out.br.counted.L > out.br.counted.F);
 });
 
+test('vs2022 (2T-1.4): contra o 2º turno de 2022 das mesmas zonas; folga = fatia de 2022 no que falta − o que Lula precisa', () => {
+  const w = S.makeWorld({ seed: 7 });
+  const baseline = { rows: w.rows, unidades: w.units.map((u) => ({ id: u.id, uf: u.uf, mun: u.mun, zona: u.zona, x: u.x, E: u.E, secoes: 10 })) };
+  const fb = {};
+  w.units.forEach((u, i) => { if (i % 10) fb[u.id] = [u.E * (0.4 + 0.002 * i), u.E * 0.4, 1, 1, u.E * 0.2]; });   // 1 em 10 sem 2022
+  const mk = (fb22) => St.create({ engine: E, baseline, prior: { rows: w.rows, M: w.priorM }, fallback22: fb22, opts: { lambda0: 2e6 * w.totalE / 158.7e6 } });
+  assert.equal(mk(null).compute().vs2022, null);
+  const st = mk(fb);
+  const antes = st.compute().vs2022;
+  assert.equal(antes.apurado, null);
+  near(antes.restante.precisa, 0.5, 1e-12);
+  assert.ok(antes.cobertura > 0.8 && antes.cobertura < 1);
+  S.stateAt(w, 0.5).forEach((u) => { if (u.y) st.update(u.id, { y: u.y }); });
+  const out = st.compute(), v = out.vs2022;
+  let cV = 0, cL = 0, c22 = 0;
+  w.units.forEach((u) => { const y = st._units[u.id].y; if (!y || !fb[u.id]) return; const p = fb[u.id][0] / (fb[u.id][0] + fb[u.id][1]); cV += y[0] + y[1]; cL += y[0]; c22 += (y[0] + y[1]) * p; });
+  near(v.apurado.lula, cL / cV, 1e-9); near(v.apurado.lula22, c22 / cV, 1e-9); near(v.apurado.dif, cL / cV - c22 / cV, 1e-12);
+  const vRem = out.br.rem.L + out.br.rem.F;
+  near(v.restante.precisa, (0.5 * (out.br.counted.L + out.br.counted.F + vRem) - out.br.counted.L) / vRem, 1e-12);
+  near(v.restante.folga, v.restante.lula22 - v.restante.precisa, 1e-12);
+  assert.ok(v.restante.lula22 > 0.4 && v.restante.lula22 < 0.75);
+  // margem em votos: vantagem de 2022 nos válidos projetados + perda projetada = margem projetada das zonas com 2022
+  const m = v.margem;
+  near(m.sobraProjetada, m.vantagem2022 + m.perdaProjetada, 1e-6);
+  assert.ok(m.perdaApurado !== null && Number.isFinite(m.perdaApurado) && m.erroVotos > 0);
+  assert.equal(antes.margem.perdaApurado, null);
+  near(antes.margem.vantagem2022 + antes.margem.perdaProjetada, antes.margem.sobraProjetada, 1e-6);
+});
+
+test('chance (2T-1.4): t de 4 g.l. em (L − 50%)/σ, σ = metade da faixa; teto [5%, 95%] até 95% apurado; null antes; certeza no fim', () => {
+  const { w, st } = mkState(7);
+  assert.equal(st.compute().chance, null);
+  S.stateAt(w, 0.3).forEach((u) => { if (u.y) st.update(u.id, { y: u.y }); });
+  const out = st.compute(), c = out.chance, sig = out.uncertainty.pp / 2;
+  near(c.sigmaPP, sig, 1e-12);
+  near(c.L + c.F, 1, 1e-12);
+  assert.equal(c.teto, St.CHANCE_TETO);
+  const z = (out.br.finalShare.L - 0.5) * 100 / sig;
+  // t de Student com 4 g.l.: referência por integração numérica da densidade 3/8·(1 + x²/4)^(−5/2)
+  const tRef = (x) => { let s = 0; const n = 20000, h = x / n; for (let i = 0; i < n; i++) { const m = (i + 0.5) * h; s += 0.375 * Math.pow(1 + m * m / 4, -2.5) * h; } return 0.5 + s; };
+  near(St.tCdf4(2), 0.9419417, 1e-6); near(St.tCdf4(-1.3), tRef(-1.3), 1e-8); near(St.tCdf4(0.7), tRef(0.7), 1e-8);
+  near(c.L, Math.min(0.95, Math.max(0.05, tRef(z))), 1e-7);
+  assert.ok(c.L >= 0.05 && c.L <= 0.95, 'teto até 95% apurado');
+  assert.ok(St.tCdf4(2) < St.CHANCE_TETO, 'na borda do "Indefinido" (|L − 50%| = faixa) a chance fica abaixo do teto');
+  assert.equal(c.L > 0.5, out.br.finalShare.L > 0.5);
+  S.stateAt(w, 1).forEach((u) => { if (u.y) st.update(u.id, { y: u.y }); });
+  const fim = st.compute();
+  assert.equal(fim.uncertainty.pp, 0);
+  assert.equal(fim.chance.L, fim.br.finalShare.L > 0.5 ? 1 : 0);
+  assert.equal(fim.chance.teto, null);
+});
+
 test('export/import de estado reproduz o mesmo resultado; update inválido é descartado', () => {
   const a = mkState(7), b = mkState(7);
   S.stateAt(a.w, 0.3).forEach((u) => { if (u.y) a.st.update(u.id, { y: u.y }); });
@@ -165,14 +217,15 @@ test('curva: α=0 ou sem curva == 2T-1.1 (mesmos números); curva ausente não f
   near(a.br.final.L, direct.scenarios.full.total.final[0], 1e-6, 'sem curva == motor puro');
 });
 
-test('curva: só unidades parciais (0 < st < s) são alteradas; st=0 e st=s não; α padrão 0,5', () => {
+test('curva: só unidades parciais (0 < st < s) são alteradas; st=0 e st=s não; α padrão 0,8 com rampa 0,3', () => {
   const c = mkCurveState();
   const st = c.mk();
   feed(st, c.w, 0.4, (u) => 5);
   const out = st.compute();
   const parciais = Object.values(st._units).filter((u) => u.y).length;
   assert.equal(out.diagnostics.arrivalApplied, parciais);
-  assert.equal(out.diagnostics.arrivalAlpha, 0.5);
+  assert.equal(out.diagnostics.arrivalAlpha, 0.8); assert.equal(St.ARRIVAL_ALPHA_DEFAULT, 0.8);
+  assert.equal(out.diagnostics.arrivalRamp, 0.3); assert.equal(St.ARRIVAL_RAMP_DEFAULT, 0.3);
   assert.equal(out.diagnostics.curveLoaded, true);
   const completo = c.mk(); feed(completo, c.w, 0.4, () => 10);
   assert.equal(completo.compute().diagnostics.arrivalApplied, 0, 'st=s: curva sem efeito');
@@ -189,7 +242,7 @@ test('curva: só unidades parciais (0 < st < s) são alteradas; st=0 e st=s não
 test('curva: interpolação linear (d(0)=d1, d(n)=0) confere com cálculo independente do xc/xr', () => {
   const c = mkCurveState();
   const K = c.w.rows.length;
-  const st = c.mk({ opts: Object.assign({}, c.opts, { arrivalAlpha: 0.75 }) });
+  const st = c.mk({ opts: Object.assign({}, c.opts, { arrivalAlpha: 0.75, arrivalRamp: 0 }) });   // sem rampa: testa só a interpolação
   // alvo: uma unidade com st/s = 0,25 => k = 2,5 entre k=2 e k=3
   const snap = S.stateAt(c.w, 0.4);
   const alvo = snap.find((u) => u.y);
@@ -208,13 +261,34 @@ test('curva: interpolação linear (d(0)=d1, d(n)=0) confere com cálculo indepe
   const ref = E.project(lista, c.prior, c.opts);
   near(out.br.final.L, ref.scenarios.full.total.final[0], 1e-6, 'L final com xc/xr calculados à mão');
   // antes do 1º ponto (f muito pequeno) vale d1; depois do último ponto cai para 0
-  const pouco = c.mk({ opts: Object.assign({}, c.opts, { arrivalAlpha: 1 }) }), quase = c.mk({ opts: Object.assign({}, c.opts, { arrivalAlpha: 1 }) });
+  const pouco = c.mk({ opts: Object.assign({}, c.opts, { arrivalAlpha: 1, arrivalRamp: 0 }) }), quase = c.mk({ opts: Object.assign({}, c.opts, { arrivalAlpha: 1, arrivalRamp: 0 }) });
   [pouco, quase].forEach((s2) => snap.forEach((u) => { if (u.y) s2.update(u.id, { y: u.y, E: u.E, s: 1000, st: s2 === pouco ? 1 : 999 }); }));
   const lp = pouco.compute().br.finalShare.L, lq = quase.compute().br.finalShare.L;
   const semc = c.mk({ opts: Object.assign({}, c.opts, { arrivalAlpha: 0 }) });
   snap.forEach((u) => { if (u.y) semc.update(u.id, { y: u.y, E: u.E, s: 1000, st: 999 }); });
   assert.ok(Math.abs(lq - semc.compute().br.finalShare.L) < 2e-3, 'perto do fim a curva some: ' + lq);
   assert.ok(lp > lq, 'no começo a correção é maior que no fim');
+});
+
+test('curva: rampa (2T-1.3) usa α·min(1, f/rampa); rampa 0 = α constante (2T-1.2)', () => {
+  const c = mkCurveState();
+  const snap = S.stateAt(c.w, 0.4);
+  const run = (opts, s, stv) => { const st = c.mk({ opts: Object.assign({}, c.opts, opts) }); snap.forEach((u) => { if (u.y) st.update(u.id, { y: u.y, E: u.E, s, st: stv }); }); return st.compute(); };
+  // f = 3/20 = 0,15 com rampa 0,3 => α efetivo = 0,8 · 0,5 = 0,4
+  const meio = run({}, 20, 3), ref04 = run({ arrivalAlpha: 0.4, arrivalRamp: 0 }, 20, 3);
+  near(meio.br.final.L, ref04.br.final.L, 1e-9, 'f=0,15: α efetivo 0,4');
+  // f = 0,5 >= rampa => α cheio
+  const cheio = run({}, 10, 5), ref08 = run({ arrivalAlpha: 0.8, arrivalRamp: 0 }, 10, 5);
+  near(cheio.br.final.L, ref08.br.final.L, 1e-9, 'f=0,5: α cheio');
+  // f exatamente na rampa (0,3) também é α cheio; abaixo dela a correção é menor
+  near(run({}, 10, 3).br.final.L, run({ arrivalAlpha: 0.8, arrivalRamp: 0 }, 10, 3).br.final.L, 1e-9, 'f=rampa: α cheio');
+  assert.ok(Math.abs(meio.br.final.L - run({ arrivalAlpha: 0 }, 20, 3).br.final.L) < Math.abs(run({ arrivalAlpha: 0.8, arrivalRamp: 0 }, 20, 3).br.final.L - run({ arrivalAlpha: 0 }, 20, 3).br.final.L));
+  // configuração do 2T-1.2 continua disponível: α 0,5 constante
+  const v12 = run({ arrivalAlpha: 0.5, arrivalRamp: 0 }, 20, 3);
+  assert.equal(v12.diagnostics.arrivalAlpha, 0.5); assert.equal(v12.diagnostics.arrivalRamp, 0);
+  assert.ok(v12.br.final.L !== meio.br.final.L);
+  // rampa inválida (negativa) = sem rampa
+  near(run({ arrivalRamp: -1 }, 20, 3).br.final.L, run({ arrivalAlpha: 0.8, arrivalRamp: 0 }, 20, 3).br.final.L, 1e-9, 'rampa negativa = sem rampa');
 });
 
 test('curva com rows diferentes ou formato inválido é ignorada com aviso', () => {
@@ -304,13 +378,44 @@ test('faixa calibrada: uncertainty {pp, lo, hi} segue o envelope e some em 100%'
   assert.ok(u1.pp < u0.pp && u1.lo <= st.compute().br.finalShare.L && st.compute().br.finalShare.L <= u1.hi);
   // sem curva a faixa é maior (viés maior)
   const sem = c.mk({ opts: Object.assign({}, c.opts, { arrivalAlpha: 0 }) }); feed(sem, c.w, 0.5);
-  assert.ok(sem.compute().uncertainty.pp >= u1.pp);
+  const us = sem.compute().uncertainty, ps = sem.compute().br.progressPct;
+  assert.equal(us.pp, St.envelopePP(St.ENV_SEM_CURVA, ps));
+  assert.ok(u1.classe.ate - u1.classe.de > 0.0099 && u1.classe.de <= p && p < u1.classe.ate, 'classe de 1% que contém o apurado');
   // 100% apurado
   const fim = c.mk(); feed(fim, c.w, 1, () => 10);
   const uf = fim.compute();
   assert.equal(uf.uncertainty.pp, 0); near(uf.uncertainty.lo, uf.br.finalShare.L, 1e-12);
-  // envelopes: monótonos não crescentes e pisos do plano
-  [St.ENV_CURVA, St.ENV_SEM_CURVA].forEach((t) => { for (let i = 1; i < t.length; i++) assert.ok(t[i][1] <= t[i - 1][1]); assert.ok(t[0][1] >= 1.5 && t[t.length - 1][1] >= 0.1); });
-  assert.equal(St.envelopePP(St.ENV_CURVA, 0.0499) , St.ENV_CURVA[0][1]);
-  assert.equal(St.envelopePP(St.ENV_CURVA, 0.05), St.ENV_CURVA[1][1]);
+  // envelopes (2T-1.2.1): 100 classes de 1%, cortes i/100, pisos do plano (sem exigir monotonia)
+  [St.ENV_CURVA, St.ENV_SEM_CURVA].forEach((t) => {
+    assert.equal(t.length, 100);
+    t.forEach(([corte, pp], i) => {
+      near(corte, (i + 1) / 100, 1e-12);
+      const piso = corte <= 0.05 + 1e-9 ? 1.5 : corte <= 0.6 + 1e-9 ? 0.3 : corte <= 0.9 + 1e-9 ? 0.2 : 0.1;
+      assert.ok(pp >= piso - 1e-9, `classe ${i}%: ${pp} < piso ${piso}`);
+    });
+  });
+  // sem a curva o viés é maior: a faixa sem curva é >= à com curva na grande maioria das classes
+  const maiores = St.ENV_SEM_CURVA.filter((r, i) => r[1] >= St.ENV_CURVA[i][1]).length;
+  assert.ok(maiores >= 90, `ENV_SEM_CURVA >= ENV_CURVA em só ${maiores} classes`);
+  // fronteiras das classes
+  assert.equal(St.envelopePP(St.ENV_CURVA, 0.0999), St.ENV_CURVA[9][1]);
+  assert.equal(St.envelopePP(St.ENV_CURVA, 0.10), St.ENV_CURVA[10][1]);
+  assert.equal(St.envelopePP(St.ENV_CURVA, 0), St.ENV_CURVA[0][1]);
+  assert.equal(St.envelopePP(St.ENV_CURVA, 1), St.ENV_CURVA[99][1]);
+  // a faixa varia ao longo da apuração (mais de 10 valores distintos entre 5% e 95%)
+  assert.ok(new Set(St.ENV_CURVA.slice(5, 95).map((r) => r[1])).size > 10);
+});
+
+test('faixa da versão por seção (2T-1.4): com pertença exata em alguma zona, pp = máx(ENV_CURVA, ENV_PERTENCA)', () => {
+  const c = mkCurveState();
+  const st = c.mk();
+  feed(st, c.w, 0.5);
+  const base = st.compute(), p = base.br.progressPct, K = c.w.rows.length;
+  assert.equal(base.uncertainty.pp, St.envelopePP(St.ENV_CURVA, p));
+  const alvo = S.stateAt(c.w, 0.5).find((u) => u.y);
+  st.update(alvo.id, { xc: new Array(K).fill(1) });
+  const out = st.compute();
+  assert.equal(out.diagnostics.membershipApplied, 1);
+  assert.equal(out.uncertainty.pp, Math.max(St.envelopePP(St.ENV_CURVA, p), St.envelopePP(St.ENV_PERTENCA, p)));
+  assert.equal(St.ENV_PERTENCA.length, 100);
 });
