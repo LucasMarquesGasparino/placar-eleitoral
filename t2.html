@@ -107,27 +107,43 @@
 
       <section id="t2-vs22-panel" class="prediction-panel t2-panel t2-vs22-panel" aria-labelledby="t2-vs22-title">
         <div class="panel-heading">
-          <div><p class="eyebrow">CONTRA O 2º TURNO DE 2022</p><h2 id="t2-vs22-title">Quanto da vantagem de 2022 Lula já perdeu</h2></div>
+          <div><p class="eyebrow">CONTRA O 2º TURNO DE 2022</p><h2 id="t2-vs22-title">A vantagem de Lula em 2022, zona a zona</h2></div>
           <span id="t2-vs22-state" class="order-note">Aguardando a apuração</span>
         </div>
         <div class="t2-vs22-content">
-          <p id="t2-vs22-intro" class="t2-vs22-intro">Se cada zona repetisse a fatia de Lula no 2º turno de 2022, com os votos válidos de hoje, ele teria uma vantagem de — votos. O contador mostra quanto disso ele vai perdendo.</p>
-          <div class="t2-vs22-grid">
-            <div class="t2-vs22-num"><span class="t2-vs22-label">Já apurado</span><strong id="t2-vs22-apurado">—</strong><span id="t2-vs22-apurado-sub" class="t2-vs22-sub">nenhuma zona lida ainda</span></div>
-            <div class="t2-vs22-num"><span class="t2-vs22-label">Projeção ao fim</span><strong id="t2-vs22-proj">—</strong><span id="t2-vs22-proj-sub" class="t2-vs22-sub">votos de margem em relação a 2022</span></div>
-            <div class="t2-vs22-num"><span class="t2-vs22-label">Sobra da vantagem</span><strong id="t2-vs22-sobra">—</strong><span id="t2-vs22-sobra-sub" class="t2-vs22-sub">abaixo de zero, Lula perde</span></div>
+          <div class="t2-vs22-cards">
+            <div class="t2-vs22-card is-base">
+              <span class="t2-vs22-label">Vantagem em 2022</span>
+              <strong id="t2-vs22-base">—</strong>
+              <span class="t2-vs22-sub">Lula − Bolsonaro no 2º turno, nas mesmas zonas</span>
+            </div>
+            <div class="t2-vs22-card is-loss">
+              <span class="t2-vs22-label">Perdeu</span>
+              <strong id="t2-vs22-perdeu">0</strong>
+              <span id="t2-vs22-perdeu-sub" class="t2-vs22-sub">nenhuma zona lida ainda</span>
+            </div>
+            <div class="t2-vs22-card is-gain">
+              <span class="t2-vs22-label">Ganhou</span>
+              <strong id="t2-vs22-ganhou">0</strong>
+              <span id="t2-vs22-ganhou-sub" class="t2-vs22-sub">nenhuma zona lida ainda</span>
+            </div>
+            <div class="t2-vs22-card is-rest">
+              <span class="t2-vs22-label">Vantagem que resta</span>
+              <strong id="t2-vs22-resta">—</strong>
+              <span id="t2-vs22-resta-pct" class="t2-vs22-pct">100% da vantagem de 2022</span>
+            </div>
+            <div class="t2-vs22-card is-risk">
+              <span class="t2-vs22-label">Chance de chegar a zero</span>
+              <strong id="t2-vs22-chance">—</strong>
+              <span id="t2-vs22-chance-sub" class="t2-vs22-sub">aparece com o primeiro dado</span>
+            </div>
           </div>
-          <div class="t2-vs22-meter" role="img" aria-label="Parte da vantagem de 2022 já consumida pela projeção">
-            <span id="t2-vs22-meter-band" class="t2-vs22-meter-band"></span><span id="t2-vs22-meter-fill" class="t2-vs22-meter-fill"></span><span class="t2-vs22-meter-zero"></span>
+          <div class="t2-vs22-ref">
+            <div class="t2-vs22-ref-row"><span>Vantagem consumida</span><div class="t2-vs22-track"><span id="t2-vs22-bar-usada"></span></div><strong id="t2-vs22-usada">0%</strong></div>
+            <div class="t2-vs22-ref-row"><span>Apurado</span><div class="t2-vs22-track is-ap"><span id="t2-vs22-bar-ap"></span></div><strong id="t2-vs22-ap">0%</strong></div>
+            <p id="t2-vs22-ritmo" class="t2-vs22-ritmo">Se a perda fosse uniforme, Lula termina na frente enquanto a vantagem consumida for menor que o apurado.</p>
           </div>
-          <div class="t2-vs22-meter-labels"><span>nada perdido</span><span>sobra zero</span></div>
-          <p id="t2-vs22-meter-cap" class="t2-vs22-cap">—</p>
-          <p id="t2-vs22-chance" class="t2-vs22-chance hidden"></p>
-          <p id="t2-vs22-falta" class="t2-vs22-line hidden"></p>
-          <p id="t2-vs22-fatia" class="t2-vs22-line hidden"></p>
-          <div id="t2-vs22-chart" class="t2-vs22-chart hidden" role="img" aria-label="Evolução da sobra projetada conforme a apuração"></div>
-          <p id="t2-vs22-chart-cap" class="t2-vs22-cap hidden">Evolução: sobra projetada (linha) e erro possível (faixa), pelo % apurado. Abaixo da linha tracejada, Lula perde.</p>
-          <p class="t2-vs22-cap">No começo da noite o já apurado tende a parecer pior: as primeiras seções de cada zona são menos lulistas. Erro possível = a faixa calibrada da projeção. Só informativo: o 2º turno de 2022 não entra na projeção.</p>
+          <p class="t2-vs22-note">Em votos: a margem apurada de cada zona contra a de 2022 proporcional ao apurado da zona. No começo da noite tende a parecer pior (as primeiras seções de cada zona são menos lulistas). Só informativo: o 2022 não entra na projeção.</p>
         </div>
       </section>
 

@@ -76,3 +76,15 @@
 - Só apresentação: projeção, faixa e chance não mudaram.
 - Correção: ao entrar ou sair do ensaio, o cache de `recompute()` (que compara só o número de versão do estado) é zerado. Desde o 2T-1.4 o ensaio usa um estado próprio, e as versões dos dois estados podiam coincidir, deixando na tela a saída do outro estado.
 - Versões: `2T-1.4.1` (versionCode 7) e `Secao-1.0.4` (versionCode 5).
+
+## 25/10/2026 — 2T-1.4.2: painel "contra 2022" simplificado
+
+- O painel passa a ter cinco campos:
+  1. a vantagem de Lula no 2º turno de 2022 nas mesmas zonas (fixa);
+  2. os votos de margem que ele perdeu, somados nas zonas em que ficou abaixo de 2022;
+  3. os votos de margem que ele ganhou, somados nas zonas em que ficou acima;
+  4. a vantagem que resta (2022 − perdeu + ganhou) e quanto ela representa da vantagem de 2022;
+  5. a chance de ela chegar a zero, que é a chance de Lula perder da projeção.
+- Abaixo dos cartões, a vantagem consumida aparece comparada ao % apurado. Se a perda fosse uniforme, Lula termina na frente enquanto a vantagem consumida for menor que o apurado.
+- Conta por zona (`out.vs2022.zonas`, em `t2-state.js`): a margem apurada da zona é comparada com a margem de 2022 multiplicada pela fração do eleitorado da zona já apurada. Com tudo apurado, "resta" é a margem de 2026 nessas zonas (há teste).
+- Saíram o gráfico, o medidor e o histórico do 2T-1.4.1. Versões `2T-1.4.2` (versionCode 8) e `Secao-1.0.5` (versionCode 6).

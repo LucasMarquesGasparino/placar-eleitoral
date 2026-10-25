@@ -253,10 +253,19 @@
       var vs2022 = null;
       if (fb22) {
         var cV = 0, cL = 0, c22 = 0, rV = 0, r22 = 0, eCob = 0, eTot = 0, colchao = 0, perdaC = 0, perdaF = 0, vFim = 0;
+        var m22 = 0, zPerdeu = 0, zGanhou = 0, nPerdeu = 0, nGanhou = 0;
         list.forEach(function (u, q) {
           var pu = full.perUnit[q], y22 = fb22[u.id];
           eTot += pu.E;
           if (!y22 || !(y22[0] + y22[1] > 0)) return;
+          // painel "contra 2022" (2T-1.4.2), em votos brutos: a margem L − F de 2022 da zona (fixa) contra a margem apurada hoje,
+          // com a de 2022 proporcional à fração do eleitorado da zona já apurada (zona completa: a margem de 2022 inteira)
+          var uu = units[u.id], ecz = sum(pu.counted), fz = uu && uu.s > 0 && uu.st >= uu.s ? 1 : (pu.E > 0 ? Math.min(1, ecz / pu.E) : 0);
+          m22 += y22[0] - y22[1];
+          if (uu && uu.y && ecz > 0) {
+            var dz = (pu.counted[0] - pu.counted[1]) - fz * (y22[0] - y22[1]);
+            if (dz < 0) { zPerdeu -= dz; nPerdeu++; } else if (dz > 0) { zGanhou += dz; nGanhou++; }
+          }
           var p22 = y22[0] / (y22[0] + y22[1]), vc = pu.counted[0] + pu.counted[1], vr = pu.rem[0] + pu.rem[1], vf = pu.final[0] + pu.final[1];
           eCob += pu.E; cV += vc; cL += pu.counted[0]; c22 += vc * p22; rV += vr; r22 += vr * p22;
           // margem (L − F) em votos: a de 2022 da zona aplicada aos votos válidos de hoje, e quanto o apurado / o projetado se afastam dela
@@ -266,6 +275,10 @@
         var vRem = br.rem.L + br.rem.F, vCnt = br.counted.L + br.counted.F;
         vs2022 = {
           cobertura: eTot > 0 ? eCob / eTot : 0,
+          // zonas (2T-1.4.2): margem22 = Σ (Lula − Bolsonaro) do 2º turno de 2022 nas zonas com 2022; perdeu / ganhou = soma, em valor
+          // absoluto, do quanto a margem apurada de cada zona ficou abaixo / acima da de 2022 (proporcional ao apurado da zona);
+          // resta = margem22 − perdeu + ganhou (com tudo apurado: a margem de 2026 nessas zonas)
+          zonas: { margem22: m22, perdeu: zPerdeu, ganhou: zGanhou, nPerdeu: nPerdeu, nGanhou: nGanhou, resta: m22 - zPerdeu + zGanhou },
           // "vantagem de 2022": margem de Lula se cada zona repetisse a fatia de 2022 com os votos válidos projetados de hoje;
           // perdaApurado: votos de margem abaixo (−) ou acima (+) de 2022 no já apurado (viesado para baixo no começo: as primeiras
           // seções da zona são menos lulistas); perdaProjetada: idem no fim, pela projeção do motor, com erroVotos = margem da faixa calibrada.

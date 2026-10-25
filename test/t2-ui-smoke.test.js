@@ -216,43 +216,50 @@ test('tela do 2T (2T-1.4): contador "contra 2022" e os dois ensaios (1º turno d
     const v = T.app.lastOutput.vs2022;
     assert.ok(v && v.cobertura > 0.95 && v.apurado === null, JSON.stringify(v && v.cobertura));
     assert.ok(Math.abs(v.restante.precisa - 0.5) < 1e-12 && v.restante.lula22 > 0.5 && v.restante.lula22 < 0.52, String(v.restante.lula22));
-    // painel próprio (2T-1.4.1): visível antes da apuração, com a vantagem de 2022 e o "no que falta"; números do apurado em branco
+    // painel "contra 2022" (2T-1.4.2): antes da apuração, vantagem de 2022 fixa, nada perdido nem ganho, resta 100%
     assert.equal($('t2-vs22-state').textContent, 'Aguardando a apuração');
-    assert.ok(/vantagem de \+\d/.test($('t2-vs22-intro').textContent), $('t2-vs22-intro').textContent);
-    const falta = $('t2-vs22-falta').textContent;
-    assert.ok(!$('t2-vs22-falta').classList.contains('hidden') && falta.startsWith('No que falta: nessas zonas Lula teve') && falta.includes('pode cair até'), falta);
-    assert.equal($('t2-vs22-apurado').textContent, '—');
-    assert.ok($('t2-vs22-chance').classList.contains('hidden') && $('t2-vs22-chart').classList.contains('hidden'));
-    assert.equal(T.app.vs22Hist.length, 0);
+    assert.ok(v.zonas && v.zonas.margem22 > 1e6 && v.zonas.perdeu === 0 && v.zonas.ganhou === 0, JSON.stringify(v.zonas));
+    assert.ok(/^\+\d{1,3}(\.\d{3})+$/.test($('t2-vs22-base').textContent), $('t2-vs22-base').textContent);
+    assert.equal($('t2-vs22-resta').textContent, $('t2-vs22-base').textContent);
+    assert.equal($('t2-vs22-perdeu').textContent, '0');
+    assert.equal($('t2-vs22-perdeu-sub').textContent, 'nenhuma zona lida ainda');
+    assert.equal($('t2-vs22-resta-pct').textContent, '100,0% da vantagem de 2022');
+    assert.equal($('t2-vs22-usada').textContent, '0,0%');
+    assert.equal($('t2-vs22-chance').textContent, '—');
+    assert.equal($('t2-vs22-chance-sub').textContent, 'aparece com o primeiro dado');
+    assert.ok($('t2-vs22-ritmo').textContent.startsWith('Se a perda fosse uniforme'));
     assert.equal(T.app.lastOutput.chance, null);
     assert.ok(!$('t2-band').textContent.includes('chance'), 'sem apurado não há chance');
     // com apurado: chance na faixa e no contador
     const o2 = Object.assign({}, T.app.lastOutput, { chance: { L: 0.873, F: 0.127, sigmaPP: 0.4 },
+      progress: Object.assign({}, T.app.lastOutput.progress, { electorateCountedPct: 0.3, unitsWithData: 100 }),
       vs2022: Object.assign({}, v, { apurado: { lula: 0.49, lula22: 0.5, dif: -0.01 },
-        margem: { vantagem2022: 2.1e6, perdaApurado: -312000, perdaProjetada: -1.6e6, sobraProjetada: 0.5e6, erroVotos: 0.4e6 } }) });
+        margem: { vantagem2022: 2.1e6, perdaApurado: -312000, perdaProjetada: -1.6e6, sobraProjetada: 0.5e6, erroVotos: 0.4e6 },
+        zonas: { margem22: 2139645, perdeu: 1234567, ganhou: 456789, nPerdeu: 1200, nGanhou: 1, resta: 2139645 - 1234567 + 456789 } }) });
     T.renderData(o2, { phase: 'live', lastOkTs: Date.now(), errors: [], intervalMs: 30000 });
     assert.ok($('t2-band').textContent.includes('chance de vitória: Lula 87%, Flávio 13%'), $('t2-band').textContent);
-    assert.ok($('t2-vs22-intro').textContent.includes('vantagem de +2,10 mi votos'));
     assert.equal($('t2-vs22-state').textContent, 'Ao vivo');
-    assert.equal($('t2-vs22-apurado').textContent, '−312 mil');
-    assert.ok($('t2-vs22-apurado-sub').textContent.includes('Lula perdeu isso'));
-    assert.equal($('t2-vs22-proj').textContent, '−1,60 mi');
-    assert.ok($('t2-vs22-proj-sub').textContent.startsWith('± 400 mil'));
-    assert.equal($('t2-vs22-sobra').textContent, '+500 mil');
-    assert.equal($('t2-vs22-sobra').className, 't2-leader-l');
-    assert.ok($('t2-vs22-sobra-sub').textContent.includes('vantagem de 2022: +2,10 mi'));
-    assert.equal($('t2-vs22-chance').textContent, 'Chance de a sobra chegar a zero, isto é, de Lula perder: 13%');
-    assert.ok($('t2-vs22-fatia').textContent.includes('(−1,00 p.p.)'));
-    // medidor: 1,6/2,1 = 76,19% perdido -> 60,95% da barra (escala 125%); faixa ± 0,4/2,1
-    assert.ok(Math.abs(parseFloat($('t2-vs22-meter-fill').style.width) - 60.952) < 0.01, $('t2-vs22-meter-fill').style.width);
-    assert.ok($('t2-vs22-meter-cap').textContent.includes('76,19% da vantagem de 2022 perdida'), $('t2-vs22-meter-cap').textContent);
-    assert.equal(T.app.vs22Hist.length, 1);
-    assert.ok(JSON.parse(ctx.localStorage.getItem('t2-vs22-hist')).pts.length === 1, 'histórico real salvo');
+    assert.equal($('t2-vs22-base').textContent, '+2.139.645');
+    assert.equal($('t2-vs22-perdeu').textContent, '−1.234.567');
+    assert.equal($('t2-vs22-perdeu-sub').textContent, 'em 1.200 zonas');
+    assert.equal($('t2-vs22-ganhou').textContent, '+456.789');
+    assert.equal($('t2-vs22-ganhou-sub').textContent, 'em 1 zona');
+    assert.equal($('t2-vs22-resta').textContent, '+1.361.867');
+    assert.ok($('t2-vs22-resta').classList.contains('is-pos'));
+    assert.equal($('t2-vs22-resta-pct').textContent, '63,6% da vantagem de 2022');
+    assert.equal($('t2-vs22-usada').textContent, '36,4%');
+    assert.equal($('t2-vs22-chance').textContent, '13%');
+    assert.ok($('t2-vs22-chance-sub').textContent.startsWith('isto é, de Lula perder'));
+    assert.equal($('t2-vs22-ap').textContent, '30,0%');
+    assert.equal($('t2-vs22-bar-ap').style.width, '30%');
+    assert.ok($('t2-vs22-ritmo').classList.contains('is-bad') && $('t2-vs22-ritmo').textContent.includes('a vantagem acaba antes do fim'), $('t2-vs22-ritmo').textContent);
+    T.renderData(Object.assign({}, o2, { vs2022: Object.assign({}, o2.vs2022, { zonas: Object.assign({}, o2.vs2022.zonas, { perdeu: 456789 + 0.2 * 2139645 }) }) }), { phase: 'live', lastOkTs: Date.now(), errors: [], intervalMs: 30000 });
+    assert.ok($('t2-vs22-ritmo').classList.contains('is-good') && $('t2-vs22-ritmo').textContent.includes('sobra vantagem ao fim: consumiu 20,0% com 30,0% apurado'), $('t2-vs22-ritmo').textContent);
     T.renderData(Object.assign({}, o2, { chance: { L: 0.9999, F: 0.0001, sigmaPP: 0.1 } }), { phase: 'live', lastOkTs: Date.now(), errors: [], intervalMs: 30000 });
     assert.ok($('t2-band').textContent.includes('Lula > 99%, Flávio < 1%'));
     T.renderData(Object.assign({}, o2, { chance: { L: 0.95, F: 0.05, sigmaPP: 0.1, teto: 0.95 } }), { phase: 'live', lastOkTs: Date.now(), errors: [], intervalMs: 30000 });
     assert.ok($('t2-band').textContent.includes('Lula > 95%, Flávio < 5%'), $('t2-band').textContent);
-    assert.ok($('t2-vs22-chance').textContent.includes('de Lula perder: < 5%'));
+    assert.equal($('t2-vs22-chance').textContent, '< 5%');
     const real = T.app.state;
     T.startRehearsal('entre');
     assert.equal(T.app.rehearsal, true);
@@ -261,23 +268,13 @@ test('tela do 2T (2T-1.4): contador "contra 2022" e os dois ensaios (1º turno d
     assert.ok($('t2-rehearsal').classList.contains('hidden'));
     assert.notEqual(T.app.state, real, 'o ensaio usa um estado próprio');
     assert.equal(T.app.state.compute().diagnostics.curveLoaded, false, 'ensaio sem curva de chegada (dados sintéticos sem viés de chegada)');
-    // o ensaio começa com histórico próprio e vazio e sem a saída em cache do estado real (no 1º passo ainda não há zona com dados)
-    assert.equal(T.app.vs22Hist.length, 0, 'histórico próprio do ensaio');
+    // sem a saída em cache do estado real (no 1º passo ainda não há zona com dados)
     assert.equal(T.app.lastOutput.progress.electorateCountedPct, T.app.state.compute().progress.electorateCountedPct, 'saída do estado do ensaio, não a do real');
-    assert.equal(JSON.parse(ctx.localStorage.getItem('t2-vs22-hist')).pts.length, 1, 'o ensaio não grava no histórico real');
-    const st = { phase: 'live', lastOkTs: Date.now(), errors: [], intervalMs: 30000 };
-    T.renderData(Object.assign({}, o2, { progress: Object.assign({}, o2.progress, { electorateCountedPct: 0.3 }) }), st);
-    T.renderData(Object.assign({}, o2, { progress: Object.assign({}, o2.progress, { electorateCountedPct: 0.6 }),
-      vs2022: Object.assign({}, o2.vs2022, { margem: Object.assign({}, o2.vs2022.margem, { sobraProjetada: -0.2e6 }) }) }), st);
-    const svg = $('t2-vs22-chart').innerHTML;
-    assert.ok(!$('t2-vs22-chart').classList.contains('hidden') && svg.startsWith('<svg') && svg.includes('<polyline') && svg.includes('stroke="#206592"'), svg.slice(0, 200));
-    assert.equal(JSON.parse(ctx.localStorage.getItem('t2-vs22-hist')).pts.length, 1);
     const lEntre = T.app.rehearsalUnits.reduce((a, u) => a + u.yFull[0], 0);
     T.startRehearsal('entre');                                                   // encerra
     assert.equal(T.app.rehearsal, false);
     assert.equal(T.app.state, real, 'o estado real volta intacto');
-    assert.equal(T.app.vs22Hist.length, 1, 'o histórico real volta intacto');
-    assert.equal(T.app.lastOutput.vs2022.margem.perdaApurado, null, 'ao sair do ensaio a tela volta à saída do estado real (sem dados), não à do ensaio');
+    assert.equal(T.app.lastOutput.progress.unitsWithData, 0, 'ao sair do ensaio a tela volta à saída do estado real (sem dados), não à do ensaio');
     assert.equal($('t2-vs22-state').textContent, 'Aguardando a apuração');
     assert.equal($('t2-rehearsal-2022').textContent, 'Ensaio sintético: entre 2022 e 2026');
     assert.equal($('t2-rehearsal').textContent, 'Ensaio sintético: 1º turno de 2026');

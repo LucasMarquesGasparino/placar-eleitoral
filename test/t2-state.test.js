@@ -73,6 +73,18 @@ test('vs2022 (2T-1.4): contra o 2º turno de 2022 das mesmas zonas; folga = fati
   near(m.sobraProjetada, m.vantagem2022 + m.perdaProjetada, 1e-6);
   assert.ok(m.perdaApurado !== null && Number.isFinite(m.perdaApurado) && m.erroVotos > 0);
   assert.equal(antes.margem.perdaApurado, null);
+  // zonas (2T-1.4.2): margem de 2022 fixa; perdeu/ganhou em valor absoluto, com a de 2022 proporcional ao apurado da zona
+  let m22 = 0; Object.values(fb).forEach((y) => { m22 += y[0] - y[1]; });
+  near(antes.zonas.margem22, m22, 1e-6); near(out.vs2022.zonas.margem22, m22, 1e-6);
+  assert.equal(antes.zonas.perdeu, 0); assert.equal(antes.zonas.ganhou, 0); near(antes.zonas.resta, m22, 1e-6);
+  const z = v.zonas;
+  assert.ok(z.perdeu >= 0 && z.ganhou >= 0 && z.nPerdeu + z.nGanhou > 0);
+  near(z.resta, m22 - z.perdeu + z.ganhou, 1e-6);
+  const fim = mk(fb);
+  S.stateAt(w, 1).forEach((u) => { if (u.y) fim.update(u.id, { y: u.y, s: 10, st: 10 }); });
+  const zf = fim.compute().vs2022.zonas;
+  let real = 0; w.units.forEach((u) => { const y = fim._units[u.id].y; if (y && fb[u.id]) real += y[0] - y[1]; });
+  near(zf.resta, real, 1e-6);                                   // tudo apurado: o que resta é a margem de hoje nessas zonas
   near(antes.margem.vantagem2022 + antes.margem.perdaProjetada, antes.margem.sobraProjetada, 1e-6);
 });
 
