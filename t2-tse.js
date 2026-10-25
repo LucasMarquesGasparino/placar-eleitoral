@@ -1,6 +1,6 @@
 /* t2-tse.js — Acesso aos dados do TSE (2º turno): URLs, adaptadores de JSON e "poller" (busca periódica).
  *
- * Esquema EA20/EA15 conferido em amostras oficiais do 1º turno de 2026; ver docs/t2-schema.md.
+ * Esquema EA20/EA15 conferido em amostras oficiais do 1º turno de 2026 e no 2º turno ao vivo (eleitorado: ver eleitorado()); ver docs/t2-schema.md.
  * Os caminhos de campos ficam centralizados em MAP. Se uma resposta futura mudar, atualize MAP e os fixtures sem espalhar nomes pelo código.
  *
  * 2T-1.1 (robustez): falhas transitórias não derrubam a apuração (o último dado bom continua), backoff exponencial,
@@ -42,7 +42,7 @@
   /* >>> ÚNICO lugar com nomes de campos EA20/EA15 observados no TSE. <<< */
   var MAP = {
     secoesTotal: ['s', 'ts'], secoesApuradas: ['s', 'st'],
-    eleitorado: ['e', 'te'], eleitoradoInstalado: ['e', 'esi'],
+    eleitorado: ['e', 'te'], eleitoradoNaoTotalizado: ['e', 'esnt'],
     comparecimento: ['e', 'c'], abstencao: ['e', 'a'], brancos: ['v', 'vb'],
     candidatos: ['carg', 0, 'agr'], candLista: 'cand', candPartidos: 'par', candNumero: 'n', candVotos: 'vap',
     abLista: ['abr'], abCodigo: 'cdabr', abSecoesApuradas: ['s', 'st'], abSecoesTotal: ['s', 'ts']      // acompanhamento da UF (EA15)
@@ -94,6 +94,18 @@
     return out;
   }
 
+  /* Eleitorado da abrangência para o motor (2T-1.6.7): o já apurado (c + a, que é o e.esa) mais o das seções ainda NÃO totalizadas
+   * (e.esnt). Assim o que falta projetar (E − apurado) é exatamente o eleitorado dessas seções; seções já totalizadas sem votos (não
+   * instaladas ou não apuradas) ficam de fora, e no fim (esnt = 0) E = c + a. Sem esnt: e.te (eleitorado total); sem os dois: null
+   * (o estado mantém o E anterior). NÃO usar e.esi: durante a contagem ele é só o eleitorado das seções já totalizadas (BA às 17:06 de
+   * 25/10/2026: 2.004 de 11.312.891) e o motor tratava a zona como quase completa (o resto do eleitorado sumia da projeção). */
+  function eleitorado(json, map) {
+    map = map || MAP;
+    var c = toNum(get(json, map.comparecimento)), a = toNum(get(json, map.abstencao)), nt = toNum(get(json, map.eleitoradoNaoTotalizado));
+    if (c !== null && a !== null && nt !== null) return c + a + nt;
+    return toNum(get(json, map.eleitorado));
+  }
+
   /* Resultado de UMA abrangência (BR, UF, município ou zona) -> { ok, y:[L,F,B,N,A], E, s, st } ou { ok:false, missing:[...] }.
    * Só vale para o 2º turno (2 candidatos): N (nulos) é DERIVADO = comparecimento - L - F - brancos. */
   function parseResultado(json, nums, map) {
@@ -111,8 +123,7 @@
     if (F === null) miss.push('candidato ' + nums.F);
     if (miss.length) return { ok: false, missing: miss };
     var N = Math.max(0, c - L - F - b);
-    var E = toNum(get(json, map.eleitoradoInstalado));
-    if (E === null) E = toNum(get(json, map.eleitorado));
+    var E = eleitorado(json, map);
     return { ok: true, y: [L, F, b, N, a], E: E, s: toNum(get(json, map.secoesTotal)), st: toNum(get(json, map.secoesApuradas)) };
   }
 
@@ -446,6 +457,6 @@
     return cs('paused', 'PAUSADO', 'info');
   }
 
-  return { BASE: BASE, START_2T_UTC: START_2T_UTC, pad: pad, makeUrls: makeUrls, MAP: MAP, get: get, toNum: toNum, candidates: candidates, parseResultado: parseResultado,
+  return { BASE: BASE, START_2T_UTC: START_2T_UTC, pad: pad, makeUrls: makeUrls, MAP: MAP, get: get, toNum: toNum, candidates: candidates, eleitorado: eleitorado, parseResultado: parseResultado,
            parseTseTime: parseTseTime, parseAcompanhamento: parseAcompanhamento, createPoller: createPoller, connectionState: connectionState };
 });

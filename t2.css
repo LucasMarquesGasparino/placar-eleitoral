@@ -81,6 +81,13 @@
 .t2-uf-table th:first-child, .t2-uf-table td:first-child { position: sticky; left: 0; z-index: 1; background: #fff; box-shadow: 1px 0 0 var(--line); }
 .t2-uf-table th:first-child { background: #fafcfb; }
 .t2-uf-table tr.is-open td { background: var(--accent-pale); }
+/* cabeçalho fixo (2T-1.6.5): a tabela rola dentro da própria caixa (até 70% da tela), com a 1ª linha e a 1ª coluna presas.
+   Precisa ser assim porque a rolagem horizontal da .table-wrap impede o sticky vertical em relação à página. */
+.t2-scroll { max-height: 70vh; overflow: auto; }
+.t2-scroll thead th { position: sticky; top: 0; z-index: 2; background: #fafcfb; box-shadow: inset 0 -1px 0 var(--line); }
+.t2-scroll thead th:first-child { left: 0; z-index: 3; box-shadow: inset 0 -1px 0 var(--line), 1px 0 0 var(--line); }
+.t2-migration-table th:first-child, .t2-migration-table td:first-child { position: sticky; left: 0; z-index: 1; background: #fff; box-shadow: 1px 0 0 var(--line); }
+.t2-migration-table thead th:first-child { background: #fafcfb; z-index: 3; }
 .t2-d22 { white-space: nowrap; font-weight: 700; font-variant-numeric: tabular-nums; }
 .t2-d22.is-gain { color: #ba3e32; }
 .t2-d22.is-loss { color: #206592; }

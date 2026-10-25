@@ -41,7 +41,7 @@ const numOf = {}; b.rows.forEach((r) => { if (b.candidatos[r]) numOf[r] = String
     const got = {}; let usados = 0;
     Object.keys(numOf).forEach((row) => { got[row] = votes[numOf[row]] || 0; usados += got[row]; });
     got.D = sumC - usados; got.B = bl; got.N = Math.max(0, c - sumC - bl); got.A = a;
-    const E = T.toNum(T.get(j, M.eleitoradoInstalado)) !== null ? g(M.eleitoradoInstalado) : g(M.eleitorado);
+    const E = T.eleitorado(j, M);                          // a mesma regra do app (apurado + seções não totalizadas)
     const diffs = [];
     b.rows.forEach((row, i) => { if (Math.abs(got[row] - u.x[i]) > 0) diffs.push(row + ': csv ' + u.x[i] + ' vs tse ' + got[row]); });
     if (E !== null && Math.abs(E - u.E) > 0) diffs.push('E: csv ' + u.E + ' vs tse ' + E);

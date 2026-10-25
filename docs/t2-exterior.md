@@ -38,7 +38,7 @@ A ponte síncrona `PlacarJornalRazao` das versões 1.5.x foi retirada: ela trava
 - A cidade fica sempre marcada como estimada.
 
 **Boletins:**
-- Só são procurados nas cidades em que JR ou ascaribe já contam mais urnas que os boletins lidos. São até "faltando + 2" seções por cidade e no máximo 40 pedidos por ciclo.
+- Só são procurados nas cidades em que JR ou ascaribe já contam mais urnas que os boletins lidos. São até "faltando + 2" seções por cidade e no máximo 30 seções por ciclo. Com o ciclo de 10 s, quem limita é a fila: 1 pedido a cada 1,5 s (40 por minuto), qualquer que seja o ritmo da sincronização.
 - O TSE bloqueia quem gera muitos 404, por isso não há varredura às cegas.
 - Cada boletim é lido uma vez e guardado no aparelho (`localStorage`, chave `t2.zzbu.3221`).
 - O decodificador DER confere:
@@ -68,9 +68,9 @@ A ponte síncrona `PlacarJornalRazao` das versões 1.5.x foi retirada: ela trava
 
 ## Sincronização
 
-- **Ritmo:** uma cadeia de `setTimeout` de 45 s, que nunca se sobrepõe. Um "Atualizar" no meio de um ciclo agenda o próximo para logo depois dele.
+- **Ritmo:** uma cadeia de `setTimeout` de 10 s, que nunca se sobrepõe. Um "Atualizar" no meio de um ciclo agenda o próximo para logo depois dele.
 - **Fontes:** rodam em paralelo, cada uma com 15 s e `AbortController`. Uma fonte com erro não segura as outras, e a tela se atualiza à medida que cada uma chega.
-- **Pausas:** pausa com o app em segundo plano e durante o ensaio. Ao voltar, sincroniza na hora se passou de 45 s.
+- **Pausas:** pausa com o app em segundo plano e durante o ensaio. Ao voltar, sincroniza na hora se passou de 10 s.
 
 ## Na tela
 

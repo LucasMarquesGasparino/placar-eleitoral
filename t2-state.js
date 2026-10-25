@@ -3,6 +3,7 @@
  *   var st = T2State.create({ engine: T2Engine, baseline: <base-2026-1t.json>, prior: <prior-2022.json>, fallback22: <fallback-2022.json>.unidades,
  *                              curve: <curva-2026-1t.json> (opcional), opts: { arrivalAlpha: 0.5 } });
  *   st.update('SP|71072|0001', { y:[L,F,B,N,A], E: 123456, s: 300, st: 120 });   // y = ACUMULADO apurado (não incremento)
+ *   // E = eleitorado da zona INTEIRA (apurado + seções ainda não totalizadas; T2Tse.eleitorado), nunca só o das seções já apuradas
  *   var out = st.compute();   // out.br, out.ufs, out.migration, out.band, out.forNeed, out.progress, out.uncertainty, out.diagnostics
  *
  * COMPOSIÇÃO DA PARTE APURADA (2T-1.2; rampa no 2T-1.3). Dentro de cada zona as seções que chegam primeiro não têm a composição da zona inteira.
@@ -459,17 +460,15 @@
     }
 
     /* Referências históricas de um conjunto de unidades (estado ou município), para as tabelas:
-       t1 = Lula e Flávio no 1º turno de 2026 (% dos votos válidos do 1º turno, da base de cada zona);
+       t1 = Lula e Flávio no 1º turno de 2026, normalizados entre os dois (L + F = 100%, como no 2º turno), da base de cada zona;
        vs22 = Lula e Bolsonaro no 2º turno de 2022 (% dos válidos) somando o fallback22 das zonas (y22 do grupo, no exterior), com
        cobertura = fração do eleitorado com dado de 2022. votosL/votosF = os mesmos em votos. Cada um é null quando não há dado. */
-    var iL = rows.indexOf('L'), iF = rows.indexOf('F'), validRows = [];
-    rows.forEach(function (r, i) { if (r !== 'B' && r !== 'N' && r !== 'A') validRows.push(i); });
-    function histAcc() { return { L1: 0, F1: 0, V1: 0, L22: 0, F22: 0, Eall: 0, Ecov: 0 }; }
+    var iL = rows.indexOf('L'), iF = rows.indexOf('F');
+    function histAcc() { return { L1: 0, F1: 0, L22: 0, F22: 0, Eall: 0, Ecov: 0 }; }
     function histAdd(acc, u) {
       var x = u.x, E = u.E > 0 ? u.E : 0;
       if (x && iL >= 0 && iF >= 0) {
         acc.L1 += x[iL] || 0; acc.F1 += x[iF] || 0;
-        for (var j = 0; j < validRows.length; j++) acc.V1 += x[validRows[j]] || 0;
       }
       acc.Eall += E;
       var y22 = u.y22 || (fb22 ? fb22[u.id] : null);
@@ -477,14 +476,17 @@
     }
     function histView(acc) {
       var v22 = acc.L22 + acc.F22;
-      return { t1: acc.V1 > 0 ? { L: acc.L1 / acc.V1, F: acc.F1 / acc.V1, votosL: acc.L1, votosF: acc.F1 } : null,
+      var v1 = acc.L1 + acc.F1;
+      return { t1: v1 > 0 ? { L: acc.L1 / v1, F: acc.F1 / v1, votosL: acc.L1, votosF: acc.F1 } : null,
                vs22: v22 > 0 ? { L: acc.L22 / v22, F: acc.F22 / v22, votosL: acc.L22, votosF: acc.F22,
                                  cobertura: acc.Eall > 0 ? acc.Ecov / acc.Eall : 1 } : null };
     }
 
-    /* lastUpdateTs = horário dos dados (não do salvamento); savedAt = quando foi gravado. */
+    /* lastUpdateTs = horário dos dados (não do salvamento); savedAt = quando foi gravado.
+     * v: 2 desde o 2T-1.6.7. No v: 1 o E salvo de zona ainda parcial era o eleitorado só das seções já totalizadas (e.esi; ver
+     * T2Tse.eleitorado): na importação ele é descartado e a zona fica com o eleitorado da base até ser relida. Zona completa mantém o E. */
     function exportState() {
-      var out = { v: 1, updates: {}, lastUpdateTs: diag.lastUpdateTs, savedAt: Date.now() };
+      var out = { v: 2, updates: {}, lastUpdateTs: diag.lastUpdateTs, savedAt: Date.now() };
       order.forEach(function (id) {
         var u = units[id];
         if (!u.y) return;
@@ -494,8 +496,13 @@
       return out;
     }
     function importState(obj) {
-      if (!obj || obj.v !== 1 || !obj.updates || typeof obj.updates !== 'object') return 0;
-      var n = 0; Object.keys(obj.updates).forEach(function (id) { if (update(id, obj.updates[id])) n++; });
+      if (!obj || (obj.v !== 1 && obj.v !== 2) || !obj.updates || typeof obj.updates !== 'object') return 0;
+      var n = 0;
+      Object.keys(obj.updates).forEach(function (id) {
+        var upd = obj.updates[id];
+        if (obj.v === 1 && upd && typeof upd === 'object' && !(upd.s > 0 && upd.st >= upd.s)) { upd = Object.assign({}, upd); delete upd.E; }
+        if (update(id, upd)) n++;
+      });
       diag.lastUpdateTs = Number(obj.lastUpdateTs) || 0;               // preserva o horário SALVO (nunca Date.now())
       version++;
       return n;

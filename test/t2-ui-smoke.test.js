@@ -226,6 +226,8 @@ test('tela do 2T: Estados e Municípios mostram 2º turno 2022 e 1º turno 2026 
     assert.equal(cells[4], '44,76% / 55,24%', 'SP no 2º turno de 2022 (oficial: Lula 44,76%)');
     assert.equal(cells[5], '—', 'sem apuração ainda');
     assert.match(cells[6], /^\d{2},\d{2}% \/ \d{2},\d{2}%$/);
+    const t1Sum = cells[6].split(' / ').reduce((a, p) => a + Number(p.replace('%', '').replace(',', '.')), 0);
+    assert.ok(Math.abs(t1Sum - 100) < 0.011, `1º turno 2026 normalizado entre Lula e Flávio: ${cells[6]}`);
     assert.equal(cells[7], '—', 'sem apuração, sem vantagem × 2022');
     T.renderMunicipalities('SP');
     const capital = $('t2-municipal-rows').children[0].children.map((c) => c.textContent);

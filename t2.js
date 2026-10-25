@@ -70,7 +70,7 @@ const app = {
   pluginError: '',
   exteriorMap: null,        // data/exterior-country-map.json (cidades do exterior: código TSE, cidade, país)
   exteriorMapNote: '',
-  ext: null,                // prévia do exterior (T2Ext, t2-ext.js): JR + ascaribe + boletins do TSE, sincronizada a cada 45 s
+  ext: null,                // prévia do exterior (T2Ext, t2-ext.js): JR + ascaribe + boletins do TSE, sincronizada a cada 10 s
   extState: null,           // estado (T2State) a que o controlador da prévia está ligado
   extQueue: null,           // fila T2FetchQ própria e lenta dos boletins do TSE (não disputa a fila do placar)
   extStatus: null,          // último status do controlador
@@ -396,8 +396,8 @@ function renderMunicipalities(uf, scroll = true) {
   let rows = app.state.municipios(uf, zz ? 100000 : 15);
   if (zz) rows = rows.filter((r) => r.ec > 0).concat(rows.filter((r) => !(r.ec > 0)));
   setText(elements['t2-mun-footer'], zz
-    ? `Exterior: todas as ${fmtInt(rows.length)} cidades; as que já têm votos (prévia dos boletins ou TSE) aparecem primeiro, depois as demais por eleitorado. 2º turno 2022: Lula × Jair Bolsonaro nas mesmas zonas; * = parte das zonas sem dado de 2022. Em percentuais, % dos votos válidos; em votos, os votos de cada um. Vantagem × 2022: a vantagem de Lula no apurado contra a de 2022 nas mesmas zonas, proporcional ao apurado de cada zona (a conta do painel "zona a zona"); + ganhou, − perdeu.`
-    : 'Exibimos os 15 municípios com maior eleitorado nesta UF. 2º turno 2022: Lula × Jair Bolsonaro nas mesmas zonas; * = parte das zonas sem dado de 2022. Em percentuais, % dos votos válidos; em votos, os votos de cada um. Vantagem × 2022: a vantagem de Lula no apurado contra a de 2022 nas mesmas zonas, proporcional ao apurado de cada zona (a conta do painel "zona a zona"); + ganhou, − perdeu.');
+    ? `Exterior: todas as ${fmtInt(rows.length)} cidades; as que já têm votos (prévia dos boletins ou TSE) aparecem primeiro, depois as demais por eleitorado. 2º turno 2022: Lula × Jair Bolsonaro nas mesmas zonas; * = parte das zonas sem dado de 2022. 1º turno 2026: Lula e Flávio só entre os dois (somam 100%), para comparar com o 2º turno. Em percentuais, % dos votos válidos; em votos, os votos de cada um. Vantagem × 2022: a vantagem de Lula no apurado contra a de 2022 nas mesmas zonas, proporcional ao apurado de cada zona (a conta do painel "zona a zona"); + ganhou, − perdeu.`
+    : 'Exibimos os 15 municípios com maior eleitorado nesta UF. 2º turno 2022: Lula × Jair Bolsonaro nas mesmas zonas; * = parte das zonas sem dado de 2022. 1º turno 2026: Lula e Flávio só entre os dois (somam 100%), para comparar com o 2º turno. Em percentuais, % dos votos válidos; em votos, os votos de cada um. Vantagem × 2022: a vantagem de Lula no apurado contra a de 2022 nas mesmas zonas, proporcional ao apurado de cada zona (a conta do painel "zona a zona"); + ganhou, − perdeu.');
   const body = elements['t2-municipal-rows'];
   body.replaceChildren();
   setText(elements['t2-mun-title'], `${app.baseline.ufs[uf] || uf} (${uf})`);
@@ -1220,7 +1220,7 @@ function onVisibility() {
   }
   if (!app.rehearsal && app.poller) {
     app.poller.start();
-    if (app.ext) app.ext.start();                 // sincroniza na hora se a última rodada tem mais de 45 s
+    if (app.ext) app.ext.start();                 // sincroniza na hora se a última rodada tem mais de 10 s
   }
   startTick();
   safe(() => renderLive(currentStatus()));

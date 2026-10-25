@@ -243,7 +243,7 @@ public final class MainActivity extends Activity {
             connection.setInstanceFollowRedirects(false);
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "application/json");
-            connection.setRequestProperty("User-Agent", "Placar-2T-Secao/1.1.3");
+            connection.setRequestProperty("User-Agent", "Placar-2T-Secao/1.1.7");
             int status = connection.getResponseCode();
             InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
             byte[] body = readLimited(stream, 2 * 1024 * 1024);

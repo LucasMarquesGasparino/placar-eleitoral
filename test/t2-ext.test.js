@@ -1,6 +1,6 @@
 'use strict';
 // Prévia do exterior (2T-1.6): decodificador de boletim de urna, leitores do Jornal Razão e do ascaribe, junção por cidade e o
-// controlador (45 s sem sobreposição, fontes isoladas, leitura dos boletins com orçamento, pausa no 429 e parada às 16:45).
+// controlador (10 s sem sobreposição, fontes isoladas, leitura dos boletins com orçamento, pausa no 429 e parada às 16:45).
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -252,7 +252,7 @@ const CS = { abr: [{ cd: 'ZZ', mu: [
   { cd: '29491', nm: 'CAMBERRA', zon: [{ cd: '0001', sec: ['0732', '0733', '0734', '0735', '0736', '0737', '0738', '0739', '0740', '0741', '0742'].map((ns) => (ns === '0742' ? { ns, nsp: '0741' } : { ns })) }] },
 ] }] };
 
-test('controlador: sincroniza ao ligar, depois a cada 45 s; fonte com erro não segura a outra; grupos só mudam quando os dados mudam', async () => {
+test('controlador: sincroniza ao ligar, depois a cada 10 s; fonte com erro não segura a outra; grupos só mudam quando os dados mudam', async () => {
   const c = clock(T0), st = fakeState();
   const src = sources({ asc: () => { throw new Error('HTTP 502'); } });
   const seen = [];
@@ -263,7 +263,7 @@ test('controlador: sincroniza ao ligar, depois a cada 45 s; fonte com erro não 
   let s = ctl.status();
   assert.equal(s.cycles, 1);
   assert.equal(s.lastSyncAt, T0);
-  assert.equal(s.nextSyncAt, T0 + 45000);
+  assert.equal(s.nextSyncAt, T0 + 10000);
   assert.equal(s.sources.jr.urnas, 31);
   assert.equal(s.sources.asc.lastError, 'HTTP 502');
   assert.equal(s.sources.jr.lastError, '');
@@ -275,8 +275,8 @@ test('controlador: sincroniza ao ligar, depois a cada 45 s; fonte com erro não 
   assert.deepEqual(s.countries.map((r) => [r.name, r.urnas, r.complete]), [['Austrália', 26, false], ['Nova Zelândia', 5, true]]);
   assert.ok(seen.length >= 2, 'a tela é avisada a cada fonte que chega');
   const callsAfterFirst = st.calls;
-  await c.advance(44000);
-  assert.equal(src.calls.v, 1, 'nada antes de 45 s');
+  await c.advance(9000);
+  assert.equal(src.calls.v, 1, 'nada antes de 10 s');
   await c.advance(1000);
   assert.equal(src.calls.v, 2);
   assert.equal(src.calls.ext, 1, 'mesma versão do JR: não baixa o ext.json de novo');
@@ -328,7 +328,7 @@ test('controlador: ciclos nunca se sobrepõem; fonte lenta estoura em 15 s (pedi
   s = ctl.status();
   assert.equal(s.cycles, 2);
   assert.equal(s.sources.jr.lastError, '');
-  assert.equal(s.nextSyncAt, T0 + 16000 + 45000);
+  assert.equal(s.nextSyncAt, T0 + 16000 + 10000);
   ctl.stop();
 });
 
@@ -401,14 +401,14 @@ test('controlador: orçamento de boletins por ciclo, pausa de 15 min no 429 e pa
   let aux = tse.log.filter((u) => u.endsWith('-aux.json'));
   assert.equal(aux.length, 4, 'no máximo buPerCycle pedidos por ciclo');
   assert.ok(aux.some((u) => u.includes('/29491/')) && aux.some((u) => u.includes('/30805/')), 'cidades intercaladas');
-  // 404 recente não é sondado de novo antes de 40 s; no ciclo seguinte (45 s) sim
+  // 404 recente não é sondado de novo antes de 40 s; no ciclo seguinte (10 s) as outras seções
   ctl._planBu();
   assert.ok(ctl._queue().every((q) => !aux.some((u) => u.includes(`/${q.mun}/0001/${q.secao}/`))));
   block = true;
-  await c.advance(45000);
+  await c.advance(10000);
   let s = ctl.status();
   assert.equal(s.sources.bu.state, 'paused');
-  assert.equal(s.sources.bu.blockedUntil, T0 + 45000 + 900000);
+  assert.equal(s.sources.bu.blockedUntil, T0 + 10000 + 900000);
   assert.match(s.sources.bu.lastError, /pediu pausa \(HTTP 429\)/);
   const n = tse.log.length;
   await c.advance(14 * 60000);

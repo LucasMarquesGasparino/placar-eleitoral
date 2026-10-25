@@ -13,7 +13,10 @@ test('EA20 Brasil do 1º turno confere com os totais oficiais e com o MAP observ
   assert.equal(metric(M.abstencao), 33469244);
   assert.equal(metric(M.brancos), 2300798);
   assert.equal(metric(M.eleitorado), 158745502);
-  assert.equal(metric(M.eleitoradoInstalado), 158745079);
+  assert.equal(metric(M.eleitoradoNaoTotalizado), 0);
+  assert.equal(metric(['e', 'esi']), 158745079);
+  // apuração encerrada: o eleitorado do motor (c + a + esnt) é o apurado, igual ao esi validado contra o CSV no 1º turno
+  assert.equal(T.eleitorado(json), 158745079);
   assert.equal(metric(M.secoesTotal), 499248);
   assert.equal(metric(M.secoesApuradas), 499248);
 

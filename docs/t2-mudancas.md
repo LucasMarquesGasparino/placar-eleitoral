@@ -194,3 +194,40 @@
   - As barras Lula × Flávio ganharam marca de 50% e separação de 2px.
   - O duelo da projeção fica lado a lado no celular.
 - Versões `2T-1.6.3` (versionCode 17) e `Secao-1.1.3` (versionCode 12).
+
+## 25/10/2026 — 2T-1.6.4 / Secao-1.1.4: 1º turno 2026 normalizado entre Lula e Flávio
+
+- Nas tabelas Estados e Municípios, a coluna "1º turno 2026" passa a mostrar Lula e Flávio só entre os dois (L + F = 100%). Assim ela se compara direto com o 2º turno de 2022 e com o apurado de hoje.
+  - Antes eram os percentuais sobre todos os válidos do 1º turno.
+  - Em votos, nada muda.
+- `t1` de `compute().ufs` e `municipios()`: `L` e `F` sobre `L + F`.
+- Versões `2T-1.6.4` (versionCode 18) e `Secao-1.1.4` (versionCode 13).
+
+## 25/10/2026 — 2T-1.6.5 / Secao-1.1.5: cabeçalho fixo nas tabelas
+
+- **Tabelas:** Estados, Municípios e "De onde vêm os votos".
+- **Rolagem:** cada tabela rola dentro da própria caixa, com até 70% da altura da tela.
+- **Partes fixas:** a 1ª linha (cabeçalho) e a 1ª coluna ficam presas, e o canto fica acima das duas.
+- **Por que dentro da caixa:** a rolagem horizontal da `.table-wrap` impede o cabeçalho fixo em relação à página, por isso o caminho é a rolagem interna.
+- **Mudança:** só CSS (`.t2-scroll`) e a classe nas três `.table-wrap`.
+- **Versões:** `2T-1.6.5` (versionCode 19) e `Secao-1.1.5` (versionCode 14).
+
+## 25/10/2026 — 2T-1.6.6 / Secao-1.1.6: prévia do exterior a cada 10 s
+
+- **Sincronização:** passa de 45 s para 10 s (`intervalMs: 10000`). Os ciclos continuam sem sobreposição: uma fonte lenta (até 15 s) só atrasa o próximo.
+- **TSE:** o ritmo dos boletins não muda. A fila própria segue com 1 pedido a cada 1,5 s (40 por minuto), a pausa de 15 min no 403/429, a releitura de seção ausente só depois de 40 s e a parada às 16:45. O ciclo mais curto só replaneja a fila com mais frequência.
+- **JR e ascaribe:** passam a ser consultados a cada 10 s. Com a mesma versão do JR, só o arquivo de versão é baixado de novo.
+- **Placar nacional:** não muda. O poller do TSE continua a cada 30 s.
+- **Versões:** `2T-1.6.6` (versionCode 20) e `Secao-1.1.6` (versionCode 15).
+
+## 25/10/2026 — 2T-1.6.7 / Secao-1.1.7: eleitorado da zona durante a apuração
+
+- Problema: na Bahia, com 1.004 × 419 apurados, a "Vantagem × 2022" mostrava −31.944: a margem de 2022 inteira das duas zonas com seções apuradas (585 − 2.774 − 29.755).
+- Causa: o parser usava `e.esi` como eleitorado da zona, e durante a contagem `esi` é só o eleitorado das seções já totalizadas (Itapebi: 572 de 8.386). A fração apurada da zona virava ≈ 1. Não apareceu antes porque a amostra era do 1º turno encerrado (`esi ≈ te`) e o TSE falso dos testes e o ensaio usavam `esi = te`.
+- Efeito maior, desde as 17h: na projeção, o resto do eleitorado de toda zona com alguma seção apurada sumia (na Bahia, com 2 zonas, 77,5 mil votos válidos projetados a menos). Com o avanço da contagem, a projeção iria virando o próprio apurado, com "% apurado" inflado e faixa estreita. O painel "contra 2022" e o "% apurado" dos municípios tinham o mesmo erro.
+- Correção: `T2Tse.eleitorado()` = `c + a + esnt` (o apurado mais as seções ainda não totalizadas; sem `esnt`, `te`), usada pelo parser e por `scripts/t2-crosscheck.js`. Com a apuração encerrada dá o mesmo número que o `esi`. Detalhes em `docs/t2-schema.md`.
+- Dados ao vivo (17:07): a vantagem da Bahia passa a +59 (Itapebi +44,8 com 6,82% apurado; Salvador +14,4).
+- Estado salvo: passa a `v: 2`. Ao abrir um estado `v: 1` (até o 1.6.6), as zonas parciais perdem o eleitorado salvo e ficam com o da base até serem relidas; as completas mantêm o salvo.
+- Testes: o TSE falso passa a ter os campos de eleitorado como no TSE real; testes do eleitorado com os números de Itapebi e do Brasil, de ponta a ponta (Vantagem × 2022 de Itapebi ≈ +44,8) e da importação `v: 1`. Com o parser antigo, 5 testes falham, inclusive o de projeção durante a apuração.
+- O teste "em voo" do poller usa prazo de relógio real; com o TSE falso mais completo ele passou a estourar 50 ms com a CPU ocupada (2 em 15). O prazo foi para 300 ms (0 em 20); o que o teste confere não mudou.
+- Versões: 2T-1.6.7 (versionCode 21) e Secao-1.1.7 (versionCode 16).

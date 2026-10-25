@@ -176,7 +176,7 @@
           <button id="t2-mode-toggle" class="country-reset" type="button" aria-pressed="false">Ver em votos</button>
         </div>
         <p class="prediction-note t2-section-note">A matriz mostra como cada grupo do 1º turno se distribui na projeção do 2º turno. A confiança cresce conforme há mais zonas apuradas.</p>
-        <div class="table-wrap">
+        <div class="table-wrap t2-scroll">
           <table class="prediction-table t2-migration-table">
             <thead><tr><th>Origem</th><th class="numeric">Votos 1T</th><th class="numeric">→ Lula</th><th class="numeric">→ Flávio</th><th class="numeric">→ Branco</th><th class="numeric">→ Nulo</th><th class="numeric">→ Abstenção</th><th>Confiança</th></tr></thead>
             <tbody id="t2-migration"><tr><td colspan="8" class="empty-cell">Calculando a matriz…</td></tr></tbody>
@@ -190,13 +190,13 @@
           <div><p class="eyebrow">RESULTADOS PROJETADOS</p><h2 id="t2-ufs-title">Estados</h2></div>
           <div class="t2-heading-actions"><span class="order-note">Toque em um estado para ver municípios</span><button id="t2-ufs-toggle" class="country-reset" type="button" aria-pressed="false">Ver em votos</button></div>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap t2-scroll">
           <table class="prediction-table t2-uf-table">
             <thead><tr><th>UF / Estado</th><th class="numeric">Apurado</th><th>À frente (proj.)</th><th class="numeric">Proj. Lula / Flávio</th><th class="numeric">2º turno 2022 Lula / Bolsonaro</th><th class="numeric">Atual Lula / Flávio</th><th class="numeric">1º turno 2026 Lula / Flávio</th><th class="numeric">Vantagem × 2022 (votos)</th></tr></thead>
             <tbody id="t2-ufs"><tr><td colspan="8" class="empty-cell">Carregando estados…</td></tr></tbody>
           </table>
         </div>
-        <div class="table-footer">2º turno 2022: Lula × Jair Bolsonaro nas mesmas zonas (* = parte das zonas sem dado de 2022). Em percentuais, % dos votos válidos; em votos, os votos de cada um (projetados na coluna Proj.). Vantagem × 2022: a vantagem de Lula no apurado contra a de 2022 nas mesmas zonas, proporcional ao apurado de cada zona (a conta do painel "zona a zona"); + ganhou, − perdeu.</div>
+        <div class="table-footer">2º turno 2022: Lula × Jair Bolsonaro nas mesmas zonas (* = parte das zonas sem dado de 2022). 1º turno 2026: Lula e Flávio só entre os dois (somam 100%), para comparar com o 2º turno. Em percentuais, % dos votos válidos; em votos, os votos de cada um (projetados na coluna Proj.). Vantagem × 2022: a vantagem de Lula no apurado contra a de 2022 nas mesmas zonas, proporcional ao apurado de cada zona (a conta do painel "zona a zona"); + ganhou, − perdeu.</div>
       </section>
 
       <section id="t2-municipal-panel" class="prediction-panel t2-panel hidden" aria-labelledby="t2-mun-title">
@@ -204,13 +204,13 @@
           <div><p class="eyebrow">DETALHE POR MUNICÍPIO</p><h2 id="t2-mun-title" tabindex="-1">Municípios</h2></div>
           <div class="t2-heading-actions"><button id="t2-mun-toggle" class="country-reset" type="button" aria-pressed="false">Ver em votos</button><button id="t2-mun-close" class="country-reset" type="button">Fechar</button></div>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap t2-scroll">
           <table class="prediction-table t2-uf-table">
             <thead><tr><th>Município</th><th class="numeric">Apurado</th><th>À frente (proj.)</th><th class="numeric">2º turno 2022 Lula / Bolsonaro</th><th class="numeric">Atual Lula / Flávio</th><th class="numeric">1º turno 2026 Lula / Flávio</th><th class="numeric">Vantagem × 2022 (votos)</th></tr></thead>
             <tbody id="t2-municipal-rows"></tbody>
           </table>
         </div>
-        <div class="table-footer t2-mun-foot"><span id="t2-mun-footer">Exibimos os 15 municípios com maior eleitorado nesta UF. 2º turno 2022: Lula × Jair Bolsonaro nas mesmas zonas; * = parte das zonas sem dado de 2022. Em percentuais, % dos votos válidos; em votos, os votos de cada um. Vantagem × 2022: a vantagem de Lula no apurado contra a de 2022 nas mesmas zonas, proporcional ao apurado de cada zona (a conta do painel "zona a zona"); + ganhou, − perdeu.</span><button id="t2-mun-back" class="country-reset" type="button">Voltar aos estados</button></div>
+        <div class="table-footer t2-mun-foot"><span id="t2-mun-footer">Exibimos os 15 municípios com maior eleitorado nesta UF. 2º turno 2022: Lula × Jair Bolsonaro nas mesmas zonas; * = parte das zonas sem dado de 2022. 1º turno 2026: Lula e Flávio só entre os dois (somam 100%), para comparar com o 2º turno. Em percentuais, % dos votos válidos; em votos, os votos de cada um. Vantagem × 2022: a vantagem de Lula no apurado contra a de 2022 nas mesmas zonas, proporcional ao apurado de cada zona (a conta do painel "zona a zona"); + ganhou, − perdeu.</span><button id="t2-mun-back" class="country-reset" type="button">Voltar aos estados</button></div>
       </section>
 
       <details id="t2-diagnostics" class="prediction-panel t2-diagnostics">

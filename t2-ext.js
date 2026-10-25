@@ -12,7 +12,7 @@
  * uma fila própria (1 pedido a cada 1,5 s), e só são procurados nas cidades em que JR/ascaribe já contam mais urnas que os boletins lidos:
  * o TSE bloqueia quem gera muitos 404, então não há varredura às cegas. Cada boletim é lido uma vez e guardado no aparelho. A leitura
  * dos boletins para às 16:45 (Brasília), para nunca disputar o TSE com o placar das 17h.
- * A sincronização roda a cada 45 s, sem sobrepor ciclos e sem bloquear a tela: tudo é assíncrono, cada fonte tem 15 s e uma fonte com
+ * A sincronização roda a cada 10 s, sem sobrepor ciclos e sem bloquear a tela: tudo é assíncrono, cada fonte tem 15 s e uma fonte com
  * erro não segura as outras.
  */
 (function (root, factory) {
@@ -424,7 +424,7 @@
     return { groups: groups, skipped: skipped };
   }
 
-  // ---------------------------------------------------------------- controlador (sincronização a cada 45 s)
+  // ---------------------------------------------------------------- controlador (sincronização a cada 10 s)
   /* cfg:
    *   state            T2State (setExternalGroups)
    *   baseline, locations (data/exterior-country-map.json .locations)
@@ -435,7 +435,7 @@
    *   now, setTimer, clearTimer (testes) */
   function createController(cfg) {
     var o = {
-      intervalMs: 45000, sourceTimeoutMs: 15000, buPerCycle: 30, buReprobeMs: 40000, buBlockMs: 900000,
+      intervalMs: 10000, sourceTimeoutMs: 15000, buPerCycle: 30, buReprobeMs: 40000, buBlockMs: 900000,
       buStopAt: START_2T_UTC - 15 * 60000, storageKey: 't2.zzbu.' + PLEITO, persistDelayMs: 3000, mergeDelayMs: 5000,
       now: function () { return Date.now(); },
       setTimer: function (fn, ms) { return setTimeout(fn, ms); },
@@ -679,7 +679,7 @@
       nextSyncAt = o.now() + ms;
       timer = o.setTimer(function () { timer = null; cycle(); }, ms);
     }
-    /* start(): liga a cadeia de 45 s. Ao voltar de uma pausa, sincroniza na hora se o último ciclo tem mais de 45 s. */
+    /* start(): liga a cadeia de 10 s. Ao voltar de uma pausa, sincroniza na hora se o último ciclo tem mais de 10 s. */
     function start() {
       if (running) return;
       running = true;

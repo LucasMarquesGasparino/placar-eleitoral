@@ -21,9 +21,12 @@ function unitJson(u, f) {
   // seções entram INTEIRAS (como no TSE): votos e "st" sempre coerentes no mesmo arquivo
   const st = Math.min(SECOES, Math.floor(SECOES * f + 1e-9)), fe = st / SECOES;
   const y = u.yFull.map((v) => Math.round(v * fe));
-  const L = y[0], F = y[1], B = y[2], N = y[3], A = y[4];
+  const L = y[0], F = y[1], B = y[2], N = y[3], A = y[4], ap = L + F + B + N + A;
+  // eleitorado como no TSE durante a contagem (2T, 25/10/2026): est = esi = esa = só o das seções já totalizadas (= c + a);
+  // esnt = o das seções ainda não totalizadas
   return { tpabr: 'zona', s: { ts: String(SECOES), st: String(st) },
-           e: { te: String(u.E), esi: String(u.E), c: String(L + F + B + N), a: String(A) }, v: { vb: String(B) },
+           e: { te: String(u.E), est: String(ap), esnt: String(Math.max(0, u.E - ap)), esi: String(ap), esni: '0', esa: String(ap), esna: '0',
+                c: String(L + F + B + N), a: String(A) }, v: { vb: String(B) },
            carg: [{ cd: '1', agr: [
              { par: [{ cand: [{ n: '22', nm: 'FLAVIO', vap: String(F) }] }] },
              { par: [{ cand: [{ n: '13', nm: 'LULA', vap: String(L) }] }] },
@@ -34,7 +37,8 @@ function aggJson(jsons) {
   const add = (path) => jsons.reduce((t, x) => t + Number(T.get(x, path)), 0);
   const cand = (n) => jsons.reduce((t, x) => t + Number(T.candidates(x).find((c) => c.n === n).vap), 0);
   return { s: { ts: String(add(['s', 'ts'])), st: String(add(['s', 'st'])) },
-           e: { te: String(add(['e', 'te'])), esi: String(add(['e', 'esi'])), c: String(add(['e', 'c'])), a: String(add(['e', 'a'])) },
+           e: { te: String(add(['e', 'te'])), est: String(add(['e', 'est'])), esnt: String(add(['e', 'esnt'])), esi: String(add(['e', 'esi'])),
+                esni: '0', esa: String(add(['e', 'esa'])), esna: '0', c: String(add(['e', 'c'])), a: String(add(['e', 'a'])) },
            v: { vb: String(add(['v', 'vb'])) },
            carg: [{ cd: '1', agr: [
              { par: [{ cand: [{ n: '13', vap: String(cand('13')) }] }] },
@@ -92,12 +96,51 @@ test('makeUrls: padrões de nome de arquivo (6 dígitos na eleição, 5 no munic
   assert.equal(T.makeUrls({ eleicao: 6257 }).resMun('AC', '1120'), 'https://resultados.tse.jus.br/oficial/ele2026/6257/dados/ac/ac01120-c0001-e006257-u.json');
 });
 
-test('parseResultado: deriva nulos, usa eleitorado instalado, acusa campos ausentes', () => {
+test('parseResultado: deriva nulos, eleitorado sem esnt cai no te (nunca no esi), acusa campos ausentes', () => {
   const p = T.parseResultado({ s: { ts: '10', st: '4' }, e: { te: '1000', esi: '990', c: '800', a: '190' }, v: { vb: '10' },
     carg: [{ agr: [{ par: [{ cand: [{ n: '13', vap: '500' }] }] }, { par: [{ cand: [{ n: '22', vap: '270' }] }] }] }] }, { L: '13', F: '22' });
-  assert.deepEqual(p, { ok: true, y: [500, 270, 10, 20, 190], E: 990, s: 10, st: 4 });
+  assert.deepEqual(p, { ok: true, y: [500, 270, 10, 20, 190], E: 1000, s: 10, st: 4 });
   const bad = T.parseResultado({ e: { c: '1' } }, { L: '13', F: '22' });
   assert.equal(bad.ok, false); assert.ok(bad.missing.includes('abstencao') && bad.missing.includes('candidato 13'));
+});
+
+// Itapebi/BA (zona 0188), arquivo real do TSE às 17:05 de 25/10/2026: 2 de 26 seções; esi = 572 é só o eleitorado das 2 seções
+const ITAPEBI = { tpabr: 'zona', s: { ts: '26', st: '2', si: '2', sni: '0', sa: '2', sna: '0' },
+  e: { te: '8386', est: '572', esnt: '7814', esi: '572', esni: '0', esa: '572', esna: '0', c: '410', a: '162' }, v: { vb: '1' },
+  carg: [{ cd: '1', agr: [{ par: [{ cand: [{ n: '22', vap: '86' }] }] }, { par: [{ cand: [{ n: '13', vap: '320' }] }] }] }] };
+
+test('eleitorado (2T-1.6.7): apurado + seções não totalizadas; sem esnt, te; sem os dois, null; nunca o esi', () => {
+  assert.deepEqual(T.parseResultado(ITAPEBI, { L: '13', F: '22' }), { ok: true, y: [320, 86, 1, 3, 162], E: 8386, s: 26, st: 2 });
+  // Brasil às 17:06: 6 eleitores em seções não instaladas ficam de fora (te − esni)
+  assert.equal(T.eleitorado({ e: { te: '158745502', est: '682901', esnt: '158062601', esi: '682895', esni: '6', esa: '682895', esna: '0',
+    c: '345054', a: '337841' } }), 158745496);
+  assert.equal(T.eleitorado({ e: { te: '1000', esi: '40', c: '30', a: '10' } }), 1000);
+  assert.equal(T.eleitorado({ e: { esi: '40', c: '30', a: '10' } }), null);
+});
+
+test('Itapebi de ponta a ponta: Vantagem × 2022 proporcional ao apurado da zona e o resto do eleitorado continua na projeção', () => {
+  const x = mkWorld(), u = x.baseline.unidades[0], y22 = [4137, 1363, 49, 240, 2300];
+  const state = St.create({ engine: E, baseline: x.baseline, prior: x.prior, opts: x.opts, fallback22: { [u.id]: y22 } });
+  const p = T.parseResultado(ITAPEBI, { L: '13', F: '22' });
+  state.update(u.id, { y: p.y, E: p.E, s: p.s, st: p.st });
+  const out = state.compute();
+  const esperado = (320 - 86) - (572 / 8386) * (4137 - 1363);       // ≈ +44,8 (com E = esi daria 234 − 2774 = −2540)
+  assert.ok(Math.abs(out.ufs[u.uf].d22.votos - esperado) < 1e-6, String(out.ufs[u.uf].d22.votos));
+  const m = state.municipios(u.uf, 9999).find((v) => v.mun === u.mun);
+  assert.ok(m.R > 7000, 'o eleitorado das 24 seções que faltam continua a projetar: ' + m.R);
+});
+
+test('poller com o TSE falso realista: zona parcial fica com o eleitorado inteiro (te), não com o das seções já apuradas', async () => {
+  const s = setup({});
+  s.tau.v = 0.3;
+  await s.poller.cycle(); await s.poller.cycle();
+  const ups = s.state.exportState().updates, parciais = Object.keys(ups).filter((id) => ups[id].st > 0 && ups[id].st < ups[id].s);
+  assert.ok(parciais.length > 5, 'precisa de zonas parciais: ' + parciais.length);
+  const byId = new Map(s.baseline.unidades.map((u) => [u.id, u]));
+  parciais.forEach((id) => assert.equal(ups[id].E, byId.get(id).E, id));
+  const out = s.state.compute();
+  // folga: zona completa fica com E = c + a, e o TSE falso arredonda os votos (até ~1 eleitor por zona)
+  assert.ok(Math.abs(out.br.E - s.w.totalE) <= Object.keys(ups).length, out.br.E + ' vs ' + s.w.totalE);
 });
 
 test('antes das 17h: nenhuma requisição', async () => {
@@ -358,7 +401,8 @@ test('justiça: com todo município "mudando" a cada ciclo, toda unidade não fi
 
 test('em voo: unidade com fetch pendurado não é pedida de novo no ciclo seguinte', async () => {
   let hangUrl = null, release = null, hangCount = 0;
-  const s = setup({}, { deadlineMs: 50 }, { wrap: (fi) => async (url, o) => {
+  // deadline de relógio real: só encerra o ciclo com a unidade pendurada; folgado para o ciclo chegar até ela com a CPU ocupada
+  const s = setup({}, { deadlineMs: 300 }, { wrap: (fi) => async (url, o) => {
     if (url === hangUrl) { hangCount++; await new Promise((r) => { release = r; }); }
     return fi(url, o);
   } });

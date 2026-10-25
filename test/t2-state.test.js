@@ -192,11 +192,12 @@ test('referências históricas (Estados e municípios): 2º turno de 2022 somand
   const outSem = semFb.compute();
   assert.equal(semFb.municipios(u0.uf, 1)[0].vs22, null);
   assert.equal(outSem.ufs[u0.uf].vs22, null);
-  // 1º turno 2026: Lula e Flávio sobre os válidos do 1º turno (todas as linhas menos B, N, A), na base das zonas
-  const val = (x) => x.slice(0, w.rows.indexOf('B')).reduce((a, b) => a + b, 0);
+  // 1º turno 2026: Lula e Flávio normalizados entre os dois (L + F = 100%), na base das zonas
+  const val = (x) => x[0] + x[1];
   const t1L = same.reduce((a, u) => a + u.x[0], 0), t1V = same.reduce((a, u) => a + val(u.x), 0);
   near(m.t1.L, t1L / t1V, 1e-9);
   near(m.t1.F, same.reduce((a, u) => a + u.x[1], 0) / t1V, 1e-9);
+  near(m.t1.L + m.t1.F, 1, 1e-12);
   // estados: as mesmas duas referências, somando todas as zonas da UF
   const all = w.units.filter((u) => u.uf === u0.uf);
   const out = st.compute();
@@ -232,7 +233,26 @@ test('importState com objeto incompleto retorna 0 sem lançar', () => {
   const { st } = mkState(7);
   assert.equal(st.importState({ v: 1 }), 0);
   assert.equal(st.importState(null), 0);
-  assert.equal(st.importState({ v: 2, updates: {} }), 0);
+  assert.equal(st.importState({ v: 3, updates: { 'U0|10000|0001': { y: [1, 2, 0, 0, 0] } } }), 0, 'versão desconhecida');
+});
+
+test('estado salvo v: 1 (até 2T-1.6.6): zona parcial perde o E salvo (era o eleitorado só das seções apuradas); completa mantém', () => {
+  const { w, st } = mkState(7);
+  const [p, c] = [w.units[0], w.units[1]];
+  const yp = p.yFull.map((v) => Math.round(v * 0.1)), yc = c.yFull.map((v) => Math.round(v));
+  const sum = (a) => a.reduce((x, y) => x + y, 0);
+  assert.equal(st.importState({ v: 1, updates: {
+    [p.id]: { y: yp, E: sum(yp), s: 10, st: 1 },
+    [c.id]: { y: yc, E: sum(yc), s: 10, st: 10 } } }), 2);
+  assert.equal(st._units[p.id].E, st._units[p.id].Ebase, 'parcial volta ao eleitorado da base');
+  assert.equal(st._units[c.id].E, sum(yc), 'completa mantém o E salvo');
+  // v: 2 (a partir do 2T-1.6.7): o E salvo vale, inclusive na zona parcial
+  st.update(p.id, { y: yp, E: p.E + 3, s: 10, st: 1 });
+  const dump = JSON.parse(JSON.stringify(st.exportState()));
+  assert.equal(dump.v, 2);
+  const b = mkState(7).st;
+  assert.ok(b.importState(dump) > 0);
+  assert.equal(b._units[p.id].E, p.E + 3);
 });
 
 test('unitInfo: null para unidade inexistente; situação da unidade', () => {

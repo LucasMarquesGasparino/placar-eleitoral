@@ -25,7 +25,9 @@ Estrutura encontrada em Brasil, UF, município e zona. O `tpabr` diferencia `br`
 | Comparecimento | `e.c` | 125.275.835 |
 | Abstenção | `e.a` | 33.469.244 |
 | Eleitorado total | `e.te` | 158.745.502 |
-| Eleitorado das seções instaladas | `e.esi` | 158.745.079 |
+| Eleitorado das seções totalizadas / não totalizadas | `e.est` / `e.esnt` | 158.745.502 / 0 |
+| Eleitorado das seções instaladas / não instaladas (entre as totalizadas) | `e.esi` / `e.esni` | 158.745.079 / 423 |
+| Eleitorado das seções apuradas / não apuradas (entre as instaladas) | `e.esa` / `e.esna` | 158.745.079 / 0 |
 | Seções totais | `s.ts` | 499.248 |
 | Seções apuradas | `s.st` | 499.248 |
 | Votos brancos | `v.vb` | 2.300.798 |
@@ -41,7 +43,13 @@ Os candidatos ficam dentro de `agr[].par[].cand[]`; `agr[].cand[]` não existe n
 
 O CSV presidencial contém 5.246 votos sob `NR_VOTAVEL=28` (Leonardo Alves de Araújo), mas esse número não aparece na lista `cand[]` válida do EA20. A diferença coincide com `v.vnt`. Na base, o código 28 deve sair de `D` e entrar em `N`; assim `N = comparecimento − válidos − brancos = 3.674.249`.
 
-No Brasil, a base de aptos do CSV difere em 72 eleitores do `e.esi` do EA20 (diferença relativa menor que 0,01%). O total nacional do plano continua dentro da tolerância definida. O crosscheck de 20 unidades retornou `20 ok, 0 com problema`, cobrindo municípios de zona única e municípios com múltiplas zonas.
+No Brasil, a base de aptos do CSV difere em 72 eleitores do eleitorado apurado final do EA20 (`e.esi` = `e.esa` = `c + a` com a apuração encerrada; diferença relativa menor que 0,01%). O total nacional do plano continua dentro da tolerância definida. O crosscheck de 20 unidades retornou `20 ok, 0 com problema`, cobrindo municípios de zona única e municípios com múltiplas zonas.
+
+### Eleitorado durante a apuração (2º turno, 25/10/2026)
+
+Os campos fecham: `te = est + esnt`, `est = esi + esni`, `esi = esa + esna` e `c + a = esa`. Durante a contagem, `esi` é só o eleitorado das seções **já totalizadas**: Itapebi/BA (zona 0188) às 17:05 tinha `te` 8.386, `esi` 572 (= c 410 + a 162) e `esnt` 7.814, com 2 de 26 seções; a Bahia inteira, `esi` 2.004 de `te` 11.312.891. Até o 2T-1.6.6 o app usava `esi` como eleitorado da zona, e o motor tratava toda zona com alguma seção apurada como quase completa.
+
+O app usa `T2Tse.eleitorado()`: `c + a + esnt` (o já apurado mais o das seções ainda não totalizadas), de modo que o que falta projetar é exatamente `esnt`; seções totalizadas sem votos ficam de fora e, no fim, o valor é `c + a`, igual ao `esi` acima. Sem `esnt`, cai em `te`.
 
 ## Acompanhamento EA15 (`-ab.json` de UF)
 
