@@ -88,3 +88,109 @@
 - Abaixo dos cartões, a vantagem consumida aparece comparada ao % apurado. Se a perda fosse uniforme, Lula termina na frente enquanto a vantagem consumida for menor que o apurado.
 - Conta por zona (`out.vs2022.zonas`, em `t2-state.js`): a margem apurada da zona é comparada com a margem de 2022 multiplicada pela fração do eleitorado da zona já apurada. Com tudo apurado, "resta" é a margem de 2026 nessas zonas (há teste).
 - Saíram o gráfico, o medidor e o histórico do 2T-1.4.1. Versões `2T-1.4.2` (versionCode 8) e `Secao-1.0.5` (versionCode 6).
+
+## 25/10/2026 — 2T-1.5.x (Codex): prévia do exterior pelo Jornal Razão
+
+- `t2-jr.js` lia o feed do Jornal Razão por uma ponte síncrona `PlacarJornalRazao` e montava um grupo externo por país. Versões `2T-1.5.1` a `2T-1.5.4` (versionCode 10 a 13) e `Secao-1.0.6`/`1.0.7`. Não foram commitadas e foram geradas com `./gradlew`, sem os testes.
+- Problemas que o 2T-1.6 corrigiu:
+  - a ponte travava a tela por até 10 s a cada 5 s;
+  - o país era tudo ou nada, e os aliases de Emirados, Tchéquia e Taiwan nunca casavam;
+  - o `aptos` das urnas recebidas era usado como eleitorado total, o que dava a Austrália com E = 1.605 e abstenção 0;
+  - uma correção para baixo congelava o feed;
+  - às 17h o painel nacional era trocado pelo total só do exterior;
+  - grupos inválidos sumiam sem aviso;
+  - havia dois testes vermelhos.
+- Por que a Base não mostrava a prévia: o código de eleição gravado pelo Diagnóstico era ≠ 6258, e a fonte desligava sem aviso.
+
+## 25/10/2026 — 2T-1.6.0 / Secao-1.1.0: prévia do exterior com três fontes e sincronização a cada 1 min
+
+- **`t2-ext.js`** substitui `t2-jr.js` e junta três fontes por cidade: boletins de urna do TSE (decodificados no app), Jornal Razão e ascaribe. Regras em `docs/t2-exterior.md`, que substitui `docs/t2-jornal-razao.md`.
+- **Sincronização:**
+  - assíncrona, a cada 60 s, sem sobrepor ciclos;
+  - fontes em paralelo, 15 s cada, com `AbortController`;
+  - "Atualizar" sincroniza na hora;
+  - pausa em segundo plano e no ensaio.
+- **Boletins do TSE:**
+  - fila própria (1 pedido a cada 1,5 s), só nas cidades com urnas a mais em outra fonte;
+  - guardados no aparelho;
+  - pausa de 15 min no 429 e parada às 16:45.
+- **`t2-state.js`:**
+  - `setExternalGroups` devolve `{accepted, rejected}` e aceita grupo sem zona (`xBase`) e `s` maior que a base;
+  - a troca para o TSE é por cidade (`st` oficial ≥ `st` do grupo, ou zonas completas);
+  - `diagnostics.external` traz `ahead`, `maskedVotes` e `bySource`.
+- **`t2-fetchq.js`:** `get(url, {as: 'buffer'})`.
+- **Tela:**
+  - painel "PRÉVIA DO EXTERIOR · BOLETINS DE URNA" antes do TSE, com a lista por país e a linha de sincronização;
+  - depois, painel nacional do TSE com "+ N urnas do exterior ainda fora do TSE";
+  - o diagnóstico mostra uma linha por fonte e "Oficial × soma das zonas" sem os grupos da prévia.
+- **Código da eleição:** um código salvo ≠ 6258 volta para 6258 com aviso, e um estado salvo antes das 17h de 25/10 é descartado.
+- **Estados e municípios:** duas colunas novas ao lado da projeção, "2º turno 2022 Lula / Bolsonaro" e "1º turno 2026 Lula / Flávio", ambas em % dos válidos.
+  - O 2022 soma o `fallback-2022` das zonas. Leva `*` quando parte do eleitorado não tem dado de 2022; sem nenhum dado, mostra "—".
+  - O 1º turno de 2026 vem da base das zonas.
+  - Conferido: SP 44,76/55,24, capital paulista 53,54/46,46 e RJ 43,47/56,53 no 2T22.
+  - As colunas Lula/Flávio ficam lado a lado, e "À frente" e "Margem" passam a dizer "(proj.)".
+- **APK:**
+  - o proxy fixo (`/jr/v.json`, `/jr/ext.json?v=N`, `/asc/exterior.json`) substitui a ponte síncrona;
+  - versões `2T-1.6.0` (versionCode 14) e `Secao-1.1.0` (versionCode 9);
+  - `build-t2s.sh` ganhou a correção do `LD_LIBRARY_PATH`.
+- **Testes:**
+  - `test/t2-ext.test.js` (novo, com dois boletins reais em `test/fixtures/bu/`);
+  - `t2-state` cobre grupos por cidade, sem zona, recusas e colunas históricas;
+  - `t2-ui-smoke` cobre a prévia, o painel nacional depois, a migração do código, o estado descartado, a sincronização no APK e as colunas novas.
+
+## 25/10/2026 — 2T-1.6.1 / Secao-1.1.1: ordem das colunas Lula/Flávio
+
+- Em "Estados" e no "Detalhe por município", as colunas de percentual seguem a ordem de comparação:
+  1. Proj.
+  2. 2º turno 2022 (Lula / Bolsonaro)
+  3. **Atual**
+  4. 1º turno 2026
+
+  O apurado fica entre as duas referências históricas. Depois vêm "À frente (proj.)" e "Margem (proj.)".
+- No "Detalhe por município" saiu a coluna "Proj. Lula / Flávio"; ficam "À frente (proj.)" e "Margem (proj.)".
+- Versões `2T-1.6.1` (versionCode 15) e `Secao-1.1.1` (versionCode 10).
+
+## 25/10/2026 — 2T-1.6.2 / Secao-1.1.2: "Ver em votos" em Estados e Municípios
+
+- "Estados" e "Detalhe por município" ganharam o botão "Ver em votos" / "Ver em percentuais", como em "De onde vêm os votos".
+- Em votos, as colunas Lula/Flávio mostram:
+  - a projeção em votos projetados;
+  - o 2º turno de 2022 em votos das zonas com dado;
+  - o apurado;
+  - o 1º turno de 2026 em votos da base.
+- A margem projetada passa a ser em votos.
+- `t1` e `vs22` de `compute().ufs` e `municipios()` ganharam `votosL`/`votosF`.
+- Corrigido: o detalhe do exterior (ZZ) mostrava só as 15 cidades de maior eleitorado.
+  - Ficavam de fora Sydney (23ª), Camberra (37ª), Wellington (45ª) e quase toda a Ásia, justamente as primeiras apuradas.
+  - Agora aparecem todas as cidades: primeiro as que já têm votos (prévia ou TSE), depois as outras, por eleitorado.
+  - Cada cidade vem com o país ao lado do nome.
+- Versões `2T-1.6.2` (versionCode 16) e `Secao-1.1.2` (versionCode 11).
+
+## 25/10/2026 — 2T-1.6.3 / Secao-1.1.3: "Vantagem × 2022" por município, 2022 nos cartões e fluidez no celular
+
+- **Detalhe por município:**
+  - Sai a coluna "Margem (proj.)".
+  - Entra "Vantagem × 2022 (votos)", que soma, nas zonas do município, a margem L − F apurada contra a de 2022 (L − Bolsonaro), proporcional ao apurado de cada zona. É a conta do painel "zona a zona" (`municipios()[].d22`), e a soma do país dá Ganhou − Perdeu.
+  - A coluna é sempre em votos, com sinal e cor do painel.
+- **Estados (Resultados projetados):**
+  - A coluna "Margem (proj.)" também sai.
+  - No lugar entra a mesma "Vantagem × 2022 (votos)", somada por UF (`compute().ufs[].d22`).
+- **Ordem das colunas, nas duas tabelas:** "À frente (proj.)" fica logo depois de "Apurado".
+- **Prévia do exterior:** a sincronização passa de 60 s para 45 s.
+  - O orçamento de boletins do TSE fica em 30 por ciclo, mantendo 40 por minuto.
+  - A nova sondagem de 404 passa a ser feita após 40 s.
+- **Cartões da apuração (prévia do exterior e painel oficial):** uma linha menor com o 2º turno de 2022 nas mesmas zonas já apuradas (`vs2022.apurado.lula22`, ponderado pelos válidos de hoje em cada zona). Leva * quando parte dos votos apurados não tem 2022 (`apurado.cobertura`).
+- **Fluidez (auditoria /dataviz):**
+  - O detalhe por município aberto passa a acompanhar os dados. Antes, ficava congelado até um toque.
+  - Tabelas e cartelas só são refeitas quando a projeção muda.
+  - `setText` só escreve se o texto mudou, e as regiões com contador de segundos deixaram de ser `aria-live`.
+  - O texto do diagnóstico do poller só é montado com o painel aberto.
+  - A 1ª coluna das tabelas fica fixa na rolagem horizontal, e a UF aberta fica marcada.
+  - Fechar ou "Voltar aos estados" retorna à linha da UF.
+  - Toques de 44px no celular.
+  - Status de erro e atraso em laranja-queimado, separados do vermelho do Lula.
+  - Cabeçalho e células maiores; cinzas com contraste de 4,5:1.
+  - A fonte web não bloqueia mais a primeira pintura.
+  - As barras Lula × Flávio ganharam marca de 50% e separação de 2px.
+  - O duelo da projeção fica lado a lado no celular.
+- Versões `2T-1.6.3` (versionCode 17) e `Secao-1.1.3` (versionCode 12).

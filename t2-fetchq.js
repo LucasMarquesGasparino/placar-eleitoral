@@ -70,11 +70,11 @@
       var TIMEOUT = {}; var th = null;
       var timeoutP = new Promise(function (_, rej) { th = o.setTimer(function () { try { if (ctrl) ctrl.abort(); } catch (e) {} rej(TIMEOUT); }, o.timeoutMs); });
       timeoutP.catch(function () {});
-      var res, json;
+      var res, json, asBuffer = item.as === 'buffer';
       try {
         res = await Promise.race([o.fetchImpl(url, fo), timeoutP]);
         if (res.status === 200) {
-          try { json = await Promise.race([res.json(), timeoutP]); }
+          try { json = await Promise.race([asBuffer ? res.arrayBuffer() : res.json(), timeoutP]); }
           catch (eJ) { if (eJ === TIMEOUT) throw eJ; o.clearTimer(th); stats.errors++; return item.resolve({ status: 200, error: 'json' }); }
         }
       } catch (e) {
@@ -86,7 +86,7 @@
       if (res.status === 200) {
         if (json === null || json === undefined) { stats.errors++; return item.resolve({ status: 200, error: 'json' }); }
         stats.ok++; stats.lastOkAt = o.now();
-        return item.resolve({ status: 200, json: json });
+        return item.resolve(asBuffer ? { status: 200, buffer: json } : { status: 200, json: json });
       }
       if (res.status === 404) {
         stats.notFound++;
@@ -120,14 +120,15 @@
     }
 
     return {
-      /* get(url, {priority, negTtlMs, deadline}) -> Promise<{status, json?, error?, cached?, retryAt?}>. Nunca rejeita.
+      /* get(url, {priority, negTtlMs, deadline, as}) -> Promise<{status, json?, buffer?, error?, cached?, retryAt?}>. Nunca rejeita.
+       * as: 'buffer' (opcional) lê o corpo como ArrayBuffer (ex.: boletim de urna .dat) e devolve { status: 200, buffer }.
        * negTtlMs (opcional) troca, só para esta URL, o tempo em que um 404 não é repetido.
        * deadline (opcional, ms no relógio o.now()): se a requisição ainda não começou depois disso, resolve 'expired'.
        * Fila cheia (queue >= maxQueue): resolve na hora 'overflow', sem enfileirar. */
       get: function (url, opt) {
         return new Promise(function (resolve) {
           if (queue.length >= o.maxQueue) { stats.overflow++; return resolve({ status: 0, error: 'overflow' }); }
-          queue.push({ url: url, priority: (opt && opt.priority) || 0, negTtlMs: opt && opt.negTtlMs, deadline: opt && opt.deadline, seq: seq++, resolve: resolve });
+          queue.push({ url: url, priority: (opt && opt.priority) || 0, negTtlMs: opt && opt.negTtlMs, deadline: opt && opt.deadline, as: opt && opt.as, seq: seq++, resolve: resolve });
           spawn();
         });
       },

@@ -78,7 +78,7 @@
     }
     var curveScale = curve && curve.esc > 0 ? curve.esc : 10000;
     var fb22 = cfg.fallback22 || null;   // opcional: { "UF|mmmmm|zzzz": [L,F,B,N,A] } = 2º turno de 2022 da própria unidade
-    var units = {}, order = [];
+    var units = {}, order = [], externalGroups = [], externalRejected = [];
     var diag = { unknownUnits: [], invalidUpdates: 0, regressions: 0, updates: 0, lastUpdateTs: 0, fallback22Used: [], arrivalApplied: 0, membershipApplied: 0 };
     var last = null;
     var version = 0;                     // sobe a cada mudança de dados (update, reset, importState): a tela recalcula só quando muda
@@ -115,8 +115,83 @@
       return true;
     }
     function updateMany(list) { var n = 0; list.forEach(function (r) { if (update(r.id, r)) n++; }); return n; }
-    function reset() { order.forEach(function (id) { units[id].y = null; units[id].E = units[id].Ebase; units[id].st = 0; units[id].xc = null; }); last = null; version++; }
+    function reset() { order.forEach(function (id) { units[id].y = null; units[id].E = units[id].Ebase; units[id].st = 0; units[id].xc = null; }); externalGroups = []; externalRejected = []; last = null; version++; }
     function versionOf() { return version; }
+
+    /* GRUPOS EXTERNOS (2T-1.6): prévia do exterior antes da totalização do TSE, um grupo por cidade (t2-ext.js). Não entram em
+     * exportState(). Em compute() cada grupo substitui as unidades de memberIds (todas ZZ) enquanto o TSE tiver menos urnas delas que o
+     * grupo; sai sozinho, cidade a cidade, quando a soma do st oficial das zonas com dado chega ao st do grupo ou quando todas as zonas
+     * estão completas no TSE. Grupo sem membro (cidade fora da base do 1º turno) traz xBase (K números, soma > 0) e E.
+     * g = { id, name, mun?, country?, memberIds: [...], y: [L,F,B,N,A] das urnas recebidas, E, s, st, xBase?, source?, ts?, urnas?, total?, est? }.
+     * s pode passar das seções da base (vale o maior). Devolve { accepted, rejected: [{ id, reason }] }. */
+    function setExternalGroups(list) {
+      var next = [], reserved = {}, rejected = [];
+      (Array.isArray(list) ? list : []).forEach(function (g) {
+        var gid = g && typeof g.id === 'string' ? g.id : '';
+        function no(reason) { rejected.push({ id: gid || '?', name: String((g && g.name) || gid || '?'), reason: reason }); }
+        if (!gid) return no('grupo sem id');
+        if (!isVec5(g.y)) return no('votos inválidos');
+        var ids = Array.isArray(g.memberIds) ? g.memberIds : [];
+        var members = [], seen = {}, xBase = new Array(K).fill(0), Ebase = 0, sections = 0, bad = '';
+        ids.forEach(function (id) {
+          if (bad) return;
+          var u = units[id];
+          if (!u) bad = 'zona ' + id + ' fora da base';
+          else if (u.uf !== 'ZZ') bad = 'zona ' + id + ' não é do exterior';
+          else if (seen[id]) bad = 'zona ' + id + ' repetida';
+          else if (reserved[id]) bad = 'zona ' + id + ' já está em outro grupo';
+          if (bad) return;
+          seen[id] = true; members.push(id); Ebase += u.Ebase; sections += u.s || 0;
+          for (var i = 0; i < K; i++) xBase[i] += u.xBase[i] || 0;
+        });
+        if (bad) return no(bad);
+        if (!members.length) {
+          if (!isVecN(g.xBase, K) || !(sum(g.xBase) > 0)) return no('cidade sem zona na base e sem composição do 1º turno');
+          xBase = g.xBase.slice();
+        } else if (!(sum(xBase) > 0)) return no('zonas sem votos no 1º turno');
+        var E = Number(g.E), st = Number(g.st), s = Math.max(Number(g.s) || 0, sections);
+        if (!isFinite(E) || !(E > 0)) E = Ebase;
+        if (!(E > 0)) return no('eleitorado inválido');
+        if (!isFinite(st) || st < 0 || Math.floor(st) !== st) return no('urnas recebidas inválidas');
+        if (!(s > 0) || st > s) return no('mais urnas recebidas que seções');
+        if (sum(g.y) > E) E = sum(g.y);
+        var y22 = null;
+        if (fb22 && members.length) {
+          var history = new Array(5).fill(0), complete = true;
+          members.forEach(function (id) {
+            var pv = fb22[id];
+            if (!isVec5(pv) || !(pv[0] + pv[1] > 0)) { complete = false; return; }
+            for (var i = 0; i < 5; i++) history[i] += pv[i];
+          });
+          if (complete) y22 = history;
+        }
+        members.forEach(function (id) { reserved[id] = true; });
+        var mun = String(g.mun || (members.length ? units[members[0]].mun : gid));
+        next.push({ id: 'EXT|' + gid, key: gid, uf: 'ZZ', mun: mun, name: String(g.name || gid), country: String(g.country || ''),
+                    memberIds: members, xBase: xBase, Ebase: Ebase, E: E, y: g.y.slice(), s: s, st: st, y22: y22,
+                    source: String(g.source || ''), ts: Number(g.ts) || 0, urnas: Number(g.urnas) || st, total: Number(g.total) || s, est: !!g.est });
+      });
+      externalGroups = next;
+      externalRejected = rejected;
+      version++;
+      return { accepted: next.length, rejected: rejected.slice() };
+    }
+    /* Situação de um grupo diante do TSE: urnas oficiais das zonas da cidade (só as zonas com dado) e se ele já saiu. */
+    function groupHandoff(g) {
+      var off = 0, withData = 0, complete = 0;
+      g.memberIds.forEach(function (id) {
+        var u = units[id];
+        if (!u || !u.y) return;
+        withData++; off += u.st || 0;
+        if (u.s > 0 && u.st >= u.s) complete++;
+      });
+      var out = withData > 0 && (off >= g.st || complete === g.memberIds.length);
+      return { off: off, out: out };
+    }
+    function clearExternalGroups() {
+      if (!externalGroups.length) return false;
+      externalGroups = []; version++; last = null; return true;
+    }
 
     function view(g) {
       var sc = Eng.validShares(g.counted), sf = Eng.validShares(g.final);
@@ -192,7 +267,14 @@
     function compute() {
       diag.fallback22Used = [];
       diag.arrivalApplied = 0; diag.membershipApplied = 0;
-      var list = order.map(function (id) {
+      var masked = {}, active = [], superseded = [], ahead = 0;
+      externalGroups.forEach(function (g) {
+        var h = groupHandoff(g);
+        if (h.out) { superseded.push(g); return; }
+        active.push(g); ahead += Math.max(0, g.st - h.off);
+        g.memberIds.forEach(function (id) { masked[id] = true; });
+      });
+      var list = order.filter(function (id) { return !masked[id]; }).map(function (id) {
         var u = units[id], E = u.E > 0 ? u.E : u.Ebase, xb = u.xBase, usedFb = false;
         if (!(sum(xb) > 0)) {
           var f = fromFallback(id, E);
@@ -206,13 +288,20 @@
         }
         return item;
       });
+      active.forEach(function (g) {
+        var E = g.E > 0 ? g.E : g.Ebase;
+        list.push({ id: g.id, uf: g.uf, mun: g.mun, name: g.name, x: Eng.normalizeX(g.xBase, E), E: E,
+                    y: g.y, y22: g.y22, s: g.s, st: g.st });
+      });
       var r = Eng.project(list, prior, opts);
       var full = r.scenarios.full;
       var byUf = Eng.aggregate(full.perUnit, function (q) { return list[q].uf; });
-      var ufs = {};
+      var ufs = {}, hist = {};
+      list.forEach(function (u) { histAdd(hist[u.uf] || (hist[u.uf] = histAcc()), u); });
       Object.keys(byUf).sort().forEach(function (k) {
         ufs[k] = view(byUf[k]);
         ufs[k].nome = (baseline.ufs && baseline.ufs[k]) || k;
+        var h = histView(hist[k] || histAcc()); ufs[k].t1 = h.t1; ufs[k].vs22 = h.vs22;
       });
       var br = view(full.total);
       // matriz de migração nacional
@@ -238,7 +327,8 @@
         }
       }
       var secCounted = 0, secTotal = 0, withData = 0;
-      order.forEach(function (id) { var u = units[id]; secCounted += u.st || 0; secTotal += u.s || 0; if (u.y) withData++; });
+      order.forEach(function (id) { var u = units[id]; if (masked[id]) return; secCounted += u.st || 0; secTotal += u.s || 0; if (u.y) withData++; });
+      active.forEach(function (g) { secCounted += g.st; secTotal += g.s; if (sum(g.y) > 0) withData++; });
       // faixa calibrada: ±pp em torno de Lula nos válidos; apuração 100% (nada a projetar; todas as seções) = sem incerteza
       var unc = { pp: 0, lo: br.finalShare.L, hi: br.finalShare.L };
       if (br.R > 1e-6 * br.E && !(secTotal > 0 && secCounted >= secTotal)) {
@@ -250,20 +340,23 @@
       }
       // contador "contra 2022" (2T-1.4): Lula no que falta apurar, comparado ao 2º turno de 2022 das MESMAS zonas (fallback22).
       // Só informativo: no ensaio 2018 -> 2022 o 2º turno anterior por zona não melhorou a projeção (docs/t2-backtest.md).
-      var vs2022 = null;
+      var vs2022 = null, dzArr = new Array(list.length).fill(null);
       if (fb22) {
         var cV = 0, cL = 0, c22 = 0, rV = 0, r22 = 0, eCob = 0, eTot = 0, colchao = 0, perdaC = 0, perdaF = 0, vFim = 0;
         var m22 = 0, zPerdeu = 0, zGanhou = 0, nPerdeu = 0, nGanhou = 0;
         list.forEach(function (u, q) {
-          var pu = full.perUnit[q], y22 = fb22[u.id];
+          var pu = full.perUnit[q], y22 = u.y22 || fb22[u.id];
           eTot += pu.E;
           if (!y22 || !(y22[0] + y22[1] > 0)) return;
           // painel "contra 2022" (2T-1.4.2), em votos brutos: a margem L − F de 2022 da zona (fixa) contra a margem apurada hoje,
           // com a de 2022 proporcional à fração do eleitorado da zona já apurada (zona completa: a margem de 2022 inteira)
-          var uu = units[u.id], ecz = sum(pu.counted), fz = uu && uu.s > 0 && uu.st >= uu.s ? 1 : (pu.E > 0 ? Math.min(1, ecz / pu.E) : 0);
+          var uu = units[u.id], ecz = sum(pu.counted);
+          var completeUnit = uu ? uu.s > 0 && uu.st >= uu.s : u.s > 0 && u.st >= u.s;
+          var fz = completeUnit ? 1 : (pu.E > 0 ? Math.min(1, ecz / pu.E) : 0);
           m22 += y22[0] - y22[1];
-          if (uu && uu.y && ecz > 0) {
+          if (((uu && uu.y) || u.y) && ecz > 0) {
             var dz = (pu.counted[0] - pu.counted[1]) - fz * (y22[0] - y22[1]);
+            dzArr[q] = dz;
             if (dz < 0) { zPerdeu -= dz; nPerdeu++; } else if (dz > 0) { zGanhou += dz; nGanhou++; }
           }
           var p22 = y22[0] / (y22[0] + y22[1]), vc = pu.counted[0] + pu.counted[1], vr = pu.rem[0] + pu.rem[1], vf = pu.final[0] + pu.final[1];
@@ -284,13 +377,22 @@
           // seções da zona são menos lulistas); perdaProjetada: idem no fim, pela projeção do motor, com erroVotos = margem da faixa calibrada.
           margem: { vantagem2022: colchao, perdaApurado: cV > 0 ? perdaC : null, perdaProjetada: perdaF, sobraProjetada: colchao + perdaF,
                     erroVotos: 2 * (unc.pp / 100) * vFim },
-          apurado: cV > 0 ? { lula: cL / cV, lula22: c22 / cV, dif: cL / cV - c22 / cV } : null,
+          // cobertura = fração dos válidos apurados que vêm de zonas com 2022 (lula22 só pesa essas zonas)
+          apurado: cV > 0 ? { lula: cL / cV, lula22: c22 / cV, dif: cL / cV - c22 / cV, cobertura: vCnt > 0 ? cV / vCnt : 1 } : null,
           restante: rV > 0 && vRem > 0 ? (function () {
             var precisa = (0.5 * (vCnt + vRem) - br.counted.L) / vRem, l22 = r22 / rV;
             return { lula22: l22, precisa: precisa, folga: l22 - precisa };
           })() : null
         };
       }
+      // d22 por UF (2T-1.6.3): Σ dz das zonas da UF (a mesma conta do painel "zona a zona" e de municipios()[].d22); null sem zona apurada
+      Object.keys(ufs).forEach(function (k) { ufs[k].d22 = null; });
+      dzArr.forEach(function (dz, q) {
+        var k = list[q].uf;
+        if (dz == null || !ufs[k]) return;
+        var d = ufs[k].d22 || (ufs[k].d22 = { votos: 0, zonas: 0 });
+        d.votos += dz; d.zonas++;
+      });
       // chance de vitória (2T-1.4): t de Student (4 g.l.) em torno da projeção com escala σ = metade da faixa calibrada (a faixa vale ~2σ).
       // Com só dois ensaios (2018, 2022) a faixa pode ser superada numa 3ª eleição: até 95% apurado a chance fica entre 5% e 95% (teto).
       // Sem apurado: null.
@@ -301,17 +403,36 @@
         if (teto) pL = Math.min(teto, Math.max(1 - teto, pL));
         chance = { L: pL, F: 1 - pL, sigmaPP: unc.pp / 2, teto: teto };
       }
-      last = { list: list, perUnit: full.perUnit };
+      last = { list: list, perUnit: full.perUnit, dz: dzArr };
       return {
         at: Date.now(),
-        progress: { electorateCountedPct: br.progressPct, unitsWithData: withData, unitsTotal: order.length, sectionsCounted: secCounted, sectionsTotal: secTotal },
+        progress: { electorateCountedPct: br.progressPct, unitsWithData: withData, unitsTotal: order.length - Object.keys(masked).length + active.length, sectionsCounted: secCounted, sectionsTotal: secTotal },
         br: br, ufs: ufs, migration: migration,
         scenarios: { full: br, noLocal: sc(r.scenarios.noLocal), priorOnly: sc(r.scenarios.priorOnly) },
         band: r.band, uncertainty: unc, forNeed: forNeed, vs2022: vs2022, chance: chance,
         diagnostics: { unknownUnits: diag.unknownUnits.slice(), fallback22Used: diag.fallback22Used.slice(), invalidUpdates: diag.invalidUpdates, regressions: diag.regressions, updates: diag.updates, lastUpdateTs: diag.lastUpdateTs,
                        arrivalApplied: diag.arrivalApplied, membershipApplied: diag.membershipApplied, arrivalAlpha: curve ? alpha : 0, arrivalRamp: curve && alpha > 0 ? ramp : 0,
-                       curveLoaded: !!curve, curveUnits: curve ? Object.keys(curve.unidades).length : 0, curveNote: curveNote }
+                       curveLoaded: !!curve, curveUnits: curve ? Object.keys(curve.unidades).length : 0, curveNote: curveNote,
+                       external: externalSummary(active, superseded, masked, ahead) }
       };
+    }
+
+    /* Resumo dos grupos externos para a tela: ativos (entram na projeção), substituídos pelo TSE e recusados (com o motivo). */
+    function externalSummary(active, superseded, masked, ahead) {
+      var votes = [0, 0, 0, 0, 0], bySource = {}, st = 0, s = 0;
+      active.forEach(function (g) {
+        for (var i = 0; i < 5; i++) votes[i] += g.y[i];
+        st += g.st; s += g.s; bySource[g.source || '?'] = (bySource[g.source || '?'] || 0) + g.st;
+      });
+      /* Votos oficiais que já existiam nas zonas mascaradas (ficam de fora da soma das zonas). */
+      var maskedVotes = [0, 0, 0, 0, 0];
+      Object.keys(masked).forEach(function (id) {
+        var y = units[id] && units[id].y;
+        if (y) for (var i = 0; i < 5; i++) maskedVotes[i] += y[i] || 0;
+      });
+      return { groups: active.length, superseded: superseded.length, rejected: externalRejected.slice(), unitsMasked: Object.keys(masked).length,
+               sectionsCounted: st, sectionsTotal: s, urnas: st, ahead: ahead, votes: votes, maskedVotes: maskedVotes, bySource: bySource,
+               names: active.map(function (g) { return g.name; }), supersededNames: superseded.map(function (g) { return g.name; }) };
     }
 
     /* Municípios de uma UF (do último compute), maiores primeiro. */
@@ -323,9 +444,42 @@
       var agg = Eng.aggregate(per, function (j) { return last.list[idx[j]].mun; });
       return Object.keys(agg).map(function (m) {
         var v = view(agg[m]); v.mun = m;
-        v.nome = (baseline.muns && baseline.muns[uf + '|' + m]) || m;
+        var item = last.list.find(function (u) { return u.uf === uf && u.mun === m && u.name; });
+        v.nome = (baseline.muns && baseline.muns[uf + '|' + m]) || (item && item.name) || m;
+        var acc = histAcc();
+        last.list.forEach(function (u) { if (u.uf === uf && u.mun === m) histAdd(acc, u); });
+        var h = histView(acc); v.t1 = h.t1; v.vs22 = h.vs22;
+        // d22 (2T-1.6.3): Σ dz das zonas do município (a mesma conta do painel "zona a zona"): a margem L − F apurada contra a de 2022
+        // proporcional ao apurado de cada zona; somando todos os municípios dá ganhou − perdeu. null sem zona apurada com 2022.
+        var d = 0, nz = 0;
+        idx.forEach(function (q) { var u = last.list[q]; if (u.mun === m && last.dz && last.dz[q] != null) { d += last.dz[q]; nz++; } });
+        v.d22 = nz > 0 ? { votos: d, zonas: nz } : null;
         return v;
       }).sort(function (a, b) { return b.E - a.E; }).slice(0, limit || 20);
+    }
+
+    /* Referências históricas de um conjunto de unidades (estado ou município), para as tabelas:
+       t1 = Lula e Flávio no 1º turno de 2026 (% dos votos válidos do 1º turno, da base de cada zona);
+       vs22 = Lula e Bolsonaro no 2º turno de 2022 (% dos válidos) somando o fallback22 das zonas (y22 do grupo, no exterior), com
+       cobertura = fração do eleitorado com dado de 2022. votosL/votosF = os mesmos em votos. Cada um é null quando não há dado. */
+    var iL = rows.indexOf('L'), iF = rows.indexOf('F'), validRows = [];
+    rows.forEach(function (r, i) { if (r !== 'B' && r !== 'N' && r !== 'A') validRows.push(i); });
+    function histAcc() { return { L1: 0, F1: 0, V1: 0, L22: 0, F22: 0, Eall: 0, Ecov: 0 }; }
+    function histAdd(acc, u) {
+      var x = u.x, E = u.E > 0 ? u.E : 0;
+      if (x && iL >= 0 && iF >= 0) {
+        acc.L1 += x[iL] || 0; acc.F1 += x[iF] || 0;
+        for (var j = 0; j < validRows.length; j++) acc.V1 += x[validRows[j]] || 0;
+      }
+      acc.Eall += E;
+      var y22 = u.y22 || (fb22 ? fb22[u.id] : null);
+      if (isVec5(y22) && y22[0] + y22[1] > 0) { acc.L22 += y22[0]; acc.F22 += y22[1]; acc.Ecov += E; }
+    }
+    function histView(acc) {
+      var v22 = acc.L22 + acc.F22;
+      return { t1: acc.V1 > 0 ? { L: acc.L1 / acc.V1, F: acc.F1 / acc.V1, votosL: acc.L1, votosF: acc.F1 } : null,
+               vs22: v22 > 0 ? { L: acc.L22 / v22, F: acc.F22 / v22, votosL: acc.L22, votosF: acc.F22,
+                                 cobertura: acc.Eall > 0 ? acc.Ecov / acc.Eall : 1 } : null };
     }
 
     /* lastUpdateTs = horário dos dados (não do salvamento); savedAt = quando foi gravado. */
@@ -354,7 +508,8 @@
       return { st: u.st || 0, s: u.s || 0, hasData: !!u.y };
     }
 
-    return { update: update, updateMany: updateMany, reset: reset, version: versionOf, compute: compute, municipios: municipios, exportState: exportState, importState: importState, unitInfo: unitInfo, _units: units };
+    return { update: update, updateMany: updateMany, reset: reset, version: versionOf, compute: compute, municipios: municipios, exportState: exportState, importState: importState, unitInfo: unitInfo,
+             setExternalGroups: setExternalGroups, clearExternalGroups: clearExternalGroups, _units: units };
   }
 
   return { create: create, LABELS: LABELS, DST: DST, ARRIVAL_ALPHA_DEFAULT: ARRIVAL_ALPHA_DEFAULT, ARRIVAL_RAMP_DEFAULT: ARRIVAL_RAMP_DEFAULT, ENV_CURVA: ENV_CURVA, ENV_SEM_CURVA: ENV_SEM_CURVA, ENV_PERTENCA: ENV_PERTENCA, CHANCE_TETO: CHANCE_TETO, tCdf4: tCdf4, envelopePP: envelopePP, envelopeIndex: envelopeIndex };

@@ -6,6 +6,12 @@ REPO=..
 : "${JAVA_HOME:=/data/data/com.termux/files/usr/lib/jvm/java-21-openjdk}"
 export JAVA_HOME
 
+# O aapt2 do Termux depende da libc++ atual; põe essa biblioteca antes de cópias antigas de ferramentas no LD_LIBRARY_PATH.
+if [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/lib" ]; then
+  LD_LIBRARY_PATH="$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  export LD_LIBRARY_PATH
+fi
+
 # O SDK é o mesmo do android-t2: reaproveita o local.properties dele (arquivo local, fora do Git).
 if [ ! -f local.properties ] && [ -f ../android-t2/local.properties ]; then cp ../android-t2/local.properties local.properties; fi
 if [ ! -f local.properties ] && [ -z "${ANDROID_HOME:-}" ]; then
@@ -43,4 +49,5 @@ echo "==> Pacote"
 aapt dump badging "$OUT" | head -3
 mkdir -p build
 cp "$OUT" build/placar-2t-secao.apk
+chmod 644 build/placar-2t-secao.apk
 echo "APK pronto: $(pwd)/build/placar-2t-secao.apk"

@@ -4,9 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f4f5f1" />
-    <meta name="description" content="Projeção estatística do segundo turno com dados oficiais do TSE." />
+    <meta name="description" content="Projeção estatística do segundo turno com dados do TSE e boletins do exterior." />
     <link rel="manifest" href="./manifest-t2.webmanifest" />
     <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
+    <!-- fonte sem bloquear a primeira pintura: sem rede (WebView na noite da eleição), a tela abre com a fonte do sistema -->
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&amp;family=Manrope:wght@500;600;700;800&amp;display=swap" media="print" onload="this.media='all'" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./t2.css" />
     <title>Placar · 2º turno</title>
@@ -31,7 +34,7 @@
         <div>
           <p class="eyebrow">ELEIÇÕES 2026 · PRESIDENTE DA REPÚBLICA</p>
           <h1>Lula × Flávio Bolsonaro</h1>
-          <p class="intro-copy">Projeção do resultado final com base na votação por zona e nos arquivos oficiais publicados pelo TSE.</p>
+          <p class="intro-copy">Projeção do resultado final com base na votação por zona. Antes de o TSE totalizar o exterior, inclui uma prévia feita dos boletins de urna já publicados (no aplicativo).</p>
         </div>
         <div class="update-card" aria-live="polite">
           <span class="update-icon" aria-hidden="true">↻</span>
@@ -41,22 +44,22 @@
 
       <div id="t2-alert" class="error-banner hidden" role="status"></div>
       <div id="t2-rehearsal-label" class="t2-rehearsal-label hidden" role="status">ENSAIO — dados sintéticos; não são resultados eleitorais.</div>
-      <div id="t2-conn" class="t2-conn is-info" role="status" aria-live="polite">
+      <div id="t2-conn" class="t2-conn is-info">
         <span class="t2-conn-dot" aria-hidden="true"></span>
-        <strong id="t2-conn-label">PRÉVIA</strong>
+        <strong id="t2-conn-label" role="status">PRÉVIA</strong>
         <span id="t2-conn-detail" class="t2-conn-detail">Carregando…</span>
       </div>
 
       <section class="prediction-panel t2-official-panel" aria-labelledby="t2-official-title">
         <div class="panel-heading">
-          <div><p class="eyebrow">APURAÇÃO OFICIAL · TSE</p><h2 id="t2-official-title">Seções apuradas: <span id="t2-off-secpct">—</span></h2></div>
+          <div><p id="t2-off-eyebrow" class="eyebrow">APURAÇÃO OFICIAL · TSE</p><h2 id="t2-official-title"><span id="t2-off-title">Seções apuradas:</span> <span id="t2-off-secpct">—</span></h2></div>
           <span id="t2-off-sections" class="order-note">—</span>
         </div>
         <div class="t2-off-body">
           <div class="progress-track t2-progress-track"><span id="t2-off-progress-bar"></span></div>
           <div class="t2-off-duel">
-            <div class="t2-off-cand t2-off-lula"><span class="t2-off-name">Lula</span><strong id="t2-off-L-pct">—</strong><small id="t2-off-L-votes">—</small></div>
-            <div class="t2-off-cand t2-off-flavio"><span class="t2-off-name">Flávio Bolsonaro</span><strong id="t2-off-F-pct">—</strong><small id="t2-off-F-votes">—</small></div>
+            <div class="t2-off-cand t2-off-lula"><span class="t2-off-name">Lula</span><strong id="t2-off-L-pct">—</strong><small id="t2-off-L-votes">—</small><small id="t2-off-L-22" class="t2-off-22 hidden"></small></div>
+            <div class="t2-off-cand t2-off-flavio"><span class="t2-off-name">Flávio Bolsonaro</span><strong id="t2-off-F-pct">—</strong><small id="t2-off-F-votes">—</small><small id="t2-off-F-22" class="t2-off-22 hidden"></small></div>
           </div>
           <div class="prediction-bar-track t2-off-bar" role="img" aria-label="Proporção apurada de votos válidos">
             <div class="prediction-bar-fill prediction-bar-lula" id="t2-off-bar-L" style="width:50%"></div>
@@ -64,6 +67,12 @@
           </div>
           <p id="t2-off-lead" class="t2-off-lead">A apuração começa às 17:00 (horário de Brasília) de 25/10.</p>
           <p id="t2-off-extra" class="t2-off-extra"></p>
+          <p id="t2-off-sync" class="t2-off-sync hidden"></p>
+          <details id="t2-off-countries" class="t2-off-countries hidden">
+            <summary id="t2-off-countries-sum">Por país</summary>
+            <ul id="t2-off-country-list" class="t2-off-country-list"></ul>
+          </details>
+          <p id="t2-off-sources" class="t2-off-sources hidden">Fontes da prévia: <a href="https://resultados.tse.jus.br/" target="_blank" rel="noopener noreferrer">boletins de urna do TSE</a> · <a href="https://jornalrazao.com/eleicoes/exterior" target="_blank" rel="noopener noreferrer">Jornal Razão</a> · <a href="https://apuracao.ascaribe.tech/" target="_blank" rel="noopener noreferrer">ascaribe</a>. Não é a totalização oficial.</p>
         </div>
       </section>
 
@@ -75,7 +84,7 @@
           </div>
           <span id="t2-status-pill" class="prediction-badge t2-status-badge">PRÉVIA</span>
         </div>
-        <div id="t2-phase-message" class="t2-phase-message" aria-live="polite">Carregando a prévia com dados históricos.</div>
+        <div id="t2-phase-message" class="t2-phase-message">Carregando a prévia com dados históricos.</div>
         <div class="prediction-duel t2-duel">
           <article class="prediction-card prediction-lula">
             <span class="prediction-candidate-label">Lula</span>
@@ -102,7 +111,7 @@
           <p id="t2-lead" class="t2-lead">Calculando a projeção…</p>
           <p id="t2-band" class="t2-band">Lula — ± — <span>(faixa: 2× o maior erro nos ensaios com a ordem real de 2018 e 2022)</span></p>
         </div>
-        <p class="prediction-note t2-disclaimer"><strong>Projeção estatística. Não é resultado oficial.</strong> Fonte dos dados: TSE.</p>
+        <p class="prediction-note t2-disclaimer"><strong>Projeção estatística. Não é resultado oficial.</strong> <span id="t2-source-note">Fonte dos dados: TSE.</span></p>
       </section>
 
       <section id="t2-vs22-panel" class="prediction-panel t2-panel t2-vs22-panel" aria-labelledby="t2-vs22-title">
@@ -179,31 +188,32 @@
       <section class="prediction-panel t2-panel" aria-labelledby="t2-ufs-title">
         <div class="panel-heading">
           <div><p class="eyebrow">RESULTADOS PROJETADOS</p><h2 id="t2-ufs-title">Estados</h2></div>
-          <span class="order-note">Toque em um estado para ver municípios</span>
+          <div class="t2-heading-actions"><span class="order-note">Toque em um estado para ver municípios</span><button id="t2-ufs-toggle" class="country-reset" type="button" aria-pressed="false">Ver em votos</button></div>
         </div>
         <div class="table-wrap">
           <table class="prediction-table t2-uf-table">
-            <thead><tr><th>UF / Estado</th><th class="numeric">Apurado</th><th class="numeric">Atual Lula / Flávio</th><th class="numeric">Proj. Lula / Flávio</th><th>À frente</th><th class="numeric">Margem</th></tr></thead>
-            <tbody id="t2-ufs"><tr><td colspan="6" class="empty-cell">Carregando estados…</td></tr></tbody>
+            <thead><tr><th>UF / Estado</th><th class="numeric">Apurado</th><th>À frente (proj.)</th><th class="numeric">Proj. Lula / Flávio</th><th class="numeric">2º turno 2022 Lula / Bolsonaro</th><th class="numeric">Atual Lula / Flávio</th><th class="numeric">1º turno 2026 Lula / Flávio</th><th class="numeric">Vantagem × 2022 (votos)</th></tr></thead>
+            <tbody id="t2-ufs"><tr><td colspan="8" class="empty-cell">Carregando estados…</td></tr></tbody>
           </table>
         </div>
+        <div class="table-footer">2º turno 2022: Lula × Jair Bolsonaro nas mesmas zonas (* = parte das zonas sem dado de 2022). Em percentuais, % dos votos válidos; em votos, os votos de cada um (projetados na coluna Proj.). Vantagem × 2022: a vantagem de Lula no apurado contra a de 2022 nas mesmas zonas, proporcional ao apurado de cada zona (a conta do painel "zona a zona"); + ganhou, − perdeu.</div>
       </section>
 
       <section id="t2-municipal-panel" class="prediction-panel t2-panel hidden" aria-labelledby="t2-mun-title">
         <div class="panel-heading">
-          <div><p class="eyebrow">DETALHE POR MUNICÍPIO</p><h2 id="t2-mun-title">Municípios</h2></div>
-          <button id="t2-mun-close" class="country-reset" type="button">Fechar</button>
+          <div><p class="eyebrow">DETALHE POR MUNICÍPIO</p><h2 id="t2-mun-title" tabindex="-1">Municípios</h2></div>
+          <div class="t2-heading-actions"><button id="t2-mun-toggle" class="country-reset" type="button" aria-pressed="false">Ver em votos</button><button id="t2-mun-close" class="country-reset" type="button">Fechar</button></div>
         </div>
         <div class="table-wrap">
           <table class="prediction-table t2-uf-table">
-            <thead><tr><th>Município</th><th class="numeric">Apurado</th><th class="numeric">Atual Lula / Flávio</th><th class="numeric">Proj. Lula / Flávio</th><th>À frente</th><th class="numeric">Margem</th></tr></thead>
+            <thead><tr><th>Município</th><th class="numeric">Apurado</th><th>À frente (proj.)</th><th class="numeric">2º turno 2022 Lula / Bolsonaro</th><th class="numeric">Atual Lula / Flávio</th><th class="numeric">1º turno 2026 Lula / Flávio</th><th class="numeric">Vantagem × 2022 (votos)</th></tr></thead>
             <tbody id="t2-municipal-rows"></tbody>
           </table>
         </div>
-        <div class="table-footer">Exibimos os 15 municípios com maior eleitorado nesta UF.</div>
+        <div class="table-footer t2-mun-foot"><span id="t2-mun-footer">Exibimos os 15 municípios com maior eleitorado nesta UF. 2º turno 2022: Lula × Jair Bolsonaro nas mesmas zonas; * = parte das zonas sem dado de 2022. Em percentuais, % dos votos válidos; em votos, os votos de cada um. Vantagem × 2022: a vantagem de Lula no apurado contra a de 2022 nas mesmas zonas, proporcional ao apurado de cada zona (a conta do painel "zona a zona"); + ganhou, − perdeu.</span><button id="t2-mun-back" class="country-reset" type="button">Voltar aos estados</button></div>
       </section>
 
-      <details class="prediction-panel t2-diagnostics">
+      <details id="t2-diagnostics" class="prediction-panel t2-diagnostics">
         <summary>Diagnóstico e ensaio</summary>
         <div id="t2-diag" class="t2-diag-content">
           <p id="t2-eleicao-status">Verificando o código da eleição…</p>
@@ -219,6 +229,7 @@
             <p id="t2-diag-poller">Poller: —</p>
             <p id="t2-diag-queue">Fila TSE: —</p>
             <p id="t2-diag-official">Oficial × soma das zonas: —</p>
+            <p id="t2-diag-ext">Prévia do exterior: aguardando inicialização.</p>
             <p id="t2-diag-arrival">Curva de chegada: —</p>
             <p id="t2-diag-plugin">Plugin: —</p>
           </div>
@@ -241,6 +252,7 @@
     <script src="./t2-fetchq.js" defer></script>
     <script src="./t2-sim.js" defer></script>
     <script src="./t2-tse.js" defer></script>
+    <script src="./t2-ext.js" defer></script>
     <script src="./t2.js" defer></script>
   </body>
 </html>

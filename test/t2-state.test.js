@@ -57,6 +57,7 @@ test('vs2022 (2T-1.4): contra o 2º turno de 2022 das mesmas zonas; folga = fati
   const st = mk(fb);
   const antes = st.compute().vs2022;
   assert.equal(antes.apurado, null);
+  assert.ok(Object.keys(st.compute().ufs).every((uf) => st.municipios(uf, 1e6).every((m) => m.d22 === null)), 'sem apuração, d22 = null');
   near(antes.restante.precisa, 0.5, 1e-12);
   assert.ok(antes.cobertura > 0.8 && antes.cobertura < 1);
   S.stateAt(w, 0.5).forEach((u) => { if (u.y) st.update(u.id, { y: u.y }); });
@@ -80,6 +81,16 @@ test('vs2022 (2T-1.4): contra o 2º turno de 2022 das mesmas zonas; folga = fati
   const z = v.zonas;
   assert.ok(z.perdeu >= 0 && z.ganhou >= 0 && z.nPerdeu + z.nGanhou > 0);
   near(z.resta, m22 - z.perdeu + z.ganhou, 1e-6);
+  // d22 por município (2T-1.6.3): a mesma conta das zonas, somada por município; somando o país dá ganhou − perdeu
+  let somaD22 = 0, comD22 = 0;
+  Object.keys(out.ufs).forEach((uf) => st.municipios(uf, 1e6).forEach((m) => { if (m.d22) { somaD22 += m.d22.votos; comD22++; } }));
+  assert.ok(comD22 > 0);
+  near(somaD22, z.ganhou - z.perdeu, 1e-6);
+  let somaUf = 0; Object.values(out.ufs).forEach((u) => { if (u.d22) somaUf += u.d22.votos; });
+  near(somaUf, z.ganhou - z.perdeu, 1e-6);
+  // cobertura do apurado: fração dos válidos apurados que vêm de zonas com 2022 (1 em 10 zonas sem 2022)
+  near(v.apurado.cobertura, cV / (out.br.counted.L + out.br.counted.F), 1e-9);
+  assert.ok(v.apurado.cobertura > 0.8 && v.apurado.cobertura < 1);
   const fim = mk(fb);
   S.stateAt(w, 1).forEach((u) => { if (u.y) fim.update(u.id, { y: u.y, s: 10, st: 10 }); });
   const zf = fim.compute().vs2022.zonas;
@@ -157,6 +168,43 @@ test('fallback de 2022: unidade desconhecida usa o 2T de 2022 da própria unidad
   assert.ok(ma.finalShare.L > mb.finalShare.L + 0.1, 'com fallback 2022 o Lula projetado deve ser bem maior: ' + ma.finalShare.L + ' vs ' + mb.finalShare.L);
 });
 
+test('referências históricas (Estados e municípios): 2º turno de 2022 somando as zonas (cobertura; null sem dado) e 1º turno de 2026', () => {
+  const w = S.makeWorld({ seed: 7 });
+  const u0 = w.units[0], mun = u0.mun, same = w.units.filter((u) => u.uf === u0.uf && u.mun === mun);
+  const baseline = { rows: w.rows, unidades: w.units.map((u) => ({ id: u.id, uf: u.uf, mun: u.mun, zona: u.zona, x: u.x, E: u.E, secoes: 10 })) };
+  const fb = {};
+  same.forEach((u, i) => { fb[u.id] = [600 + i, 400 - i, 10, 10, 100]; });
+  const st = St.create({ engine: E, baseline, prior: { rows: w.rows, M: w.priorM }, opts: { lambda0: 2e6 * w.totalE / 158.7e6 }, fallback22: fb });
+  st.compute();
+  const m = st.municipios(u0.uf, 9999).find((x) => x.mun === mun);
+  const L = same.reduce((a, u, i) => a + 600 + i, 0), F = same.reduce((a, u, i) => a + 400 - i, 0);
+  near(m.vs22.L, L / (L + F), 1e-12); near(m.vs22.F, F / (L + F), 1e-12); near(m.vs22.cobertura, 1, 1e-12);
+  const other = st.municipios(u0.uf, 9999).find((x) => x.mun !== mun);
+  if (other) assert.equal(other.vs22, null, 'município sem zona com 2022 não inventa número');
+  if (same.length > 1) {
+    const partial = Object.assign({}, fb); delete partial[same[1].id];
+    const st2 = St.create({ engine: E, baseline, prior: { rows: w.rows, M: w.priorM }, opts: { lambda0: 2e6 * w.totalE / 158.7e6 }, fallback22: partial });
+    st2.compute();
+    const m2 = st2.municipios(u0.uf, 9999).find((x) => x.mun === mun);
+    assert.ok(m2.vs22.cobertura < 1 && m2.vs22.cobertura > 0);
+  }
+  const semFb = St.create({ engine: E, baseline, prior: { rows: w.rows, M: w.priorM }, opts: { lambda0: 2e6 * w.totalE / 158.7e6 } });
+  const outSem = semFb.compute();
+  assert.equal(semFb.municipios(u0.uf, 1)[0].vs22, null);
+  assert.equal(outSem.ufs[u0.uf].vs22, null);
+  // 1º turno 2026: Lula e Flávio sobre os válidos do 1º turno (todas as linhas menos B, N, A), na base das zonas
+  const val = (x) => x.slice(0, w.rows.indexOf('B')).reduce((a, b) => a + b, 0);
+  const t1L = same.reduce((a, u) => a + u.x[0], 0), t1V = same.reduce((a, u) => a + val(u.x), 0);
+  near(m.t1.L, t1L / t1V, 1e-9);
+  near(m.t1.F, same.reduce((a, u) => a + u.x[1], 0) / t1V, 1e-9);
+  // estados: as mesmas duas referências, somando todas as zonas da UF
+  const all = w.units.filter((u) => u.uf === u0.uf);
+  const out = st.compute();
+  near(out.ufs[u0.uf].t1.L, all.reduce((a, u) => a + u.x[0], 0) / all.reduce((a, u) => a + val(u.x), 0), 1e-9);
+  near(out.ufs[u0.uf].vs22.L, L / (L + F), 1e-12, 'só as zonas com 2022 entram na fatia');
+  assert.ok(out.ufs[u0.uf].vs22.cobertura <= 1);
+});
+
 test('export -> import em estado novo preserva o horário SALVO dos dados (diagnostics.lastUpdateTs)', () => {
   const a = mkState(7), b = mkState(7);
   const TS = 1234567890000;
@@ -194,6 +242,117 @@ test('unitInfo: null para unidade inexistente; situação da unidade', () => {
   assert.ok(info && info.hasData === false && info.st === 0);
   st.update('U0|10000|0001', { y: [1, 2, 0, 0, 0], s: 10, st: 4 });
   assert.deepEqual(st.unitInfo('U0|10000|0001'), { st: 4, s: 10, hasData: true });
+});
+
+function mkExtState() {
+  const w = S.makeWorld({ seed: 7 });
+  const rows = w.rows;
+  const first = w.units[0].x;
+  const idA = 'ZZ|90001|0001', idB = 'ZZ|90001|0002', idC = 'ZZ|90002|0001';
+  const baseline = {
+    rows, ufs: { U0: 'UF zero', ZZ: 'Exterior' },
+    unidades: w.units.map((u) => ({ id: u.id, uf: u.uf, mun: u.mun, zona: u.zona, x: u.x, E: u.E, secoes: 10 }))
+      .concat([
+        { id: idA, uf: 'ZZ', mun: '90001', zona: '0001', x: first, E: 1000, secoes: 10 },
+        { id: idB, uf: 'ZZ', mun: '90001', zona: '0002', x: first, E: 2000, secoes: 10 },
+        { id: idC, uf: 'ZZ', mun: '90002', zona: '0001', x: first, E: 500, secoes: 4 },
+      ]),
+  };
+  const st = St.create({ engine: E, baseline, prior: { rows, M: w.priorM }, opts: { lambda0: 2e6 * w.totalE / 158.7e6 } });
+  return { w, st, idA, idB, idC, first };
+}
+
+test('grupos externos: substituem as zonas ZZ da cidade, não são persistidos e devolvem aceitos/recusados', () => {
+  const { w, st, idA, idB, idC } = mkExtState();
+  const before = st.compute();
+  assert.equal(before.progress.unitsWithData, 0);
+
+  const group = { id: '90001', mun: '90001', name: 'Sydney', country: 'Austrália', memberIds: [idA, idB], y: [700, 600, 100, 100, 500],
+    E: 3000, s: 20, st: 4, urnas: 4, total: 20, source: 'bu' };
+  const r = st.setExternalGroups([group]);
+  assert.deepEqual(r, { accepted: 1, rejected: [] });
+  const withExt = st.compute();
+  assert.equal(withExt.progress.unitsTotal, w.units.length + 3 - 2 + 1, 'as duas zonas da cidade viram um grupo');
+  assert.equal(withExt.progress.unitsWithData, 1);
+  assert.equal(withExt.progress.sectionsCounted, 4);
+  assert.equal(withExt.progress.sectionsTotal, before.progress.sectionsTotal);
+  const ex = withExt.diagnostics.external;
+  assert.deepEqual(ex.votes, group.y);
+  assert.deepEqual(ex.maskedVotes, [0, 0, 0, 0, 0]);
+  assert.deepEqual(ex.names, ['Sydney']);
+  assert.equal(ex.unitsMasked, 2);
+  assert.deepEqual(ex.bySource, { bu: 4 });
+  assert.equal(ex.ahead, 4);
+  near(withExt.br.counted.L, 700, 1e-6, 'votos do grupo entram no apurado');
+  const saved = st.exportState();
+  assert.equal(Object.hasOwn(saved, 'externalGroups'), false);
+  assert.deepEqual(saved.updates, {});
+
+  // recusas com motivo; os válidos da mesma lista entram
+  const bad = st.setExternalGroups([
+    group,
+    { id: 'x1', name: 'Fora', memberIds: ['ZZ|99999|0001'], y: [1, 1, 0, 0, 0], E: 10, s: 1, st: 1 },
+    { id: 'x2', name: 'Brasil', memberIds: [w.units[0].id], y: [1, 1, 0, 0, 0], E: 10, s: 1, st: 1 },
+    { id: 'x3', name: 'Repetida', memberIds: [idA], y: [1, 1, 0, 0, 0], E: 10, s: 1, st: 1 },
+    { id: 'x4', name: 'Mais urnas', memberIds: [idC], y: [1, 1, 0, 0, 0], E: 10, s: 2, st: 5 },
+    { id: 'x5', name: 'Votos', memberIds: [idC], y: [1, 1, 0], E: 10, s: 4, st: 1 },
+    { id: 'x6', name: 'Sem base', memberIds: [], y: [1, 1, 0, 0, 0], E: 10, s: 1, st: 1 },
+  ]);
+  assert.equal(bad.accepted, 1);
+  assert.deepEqual(bad.rejected.map((x) => x.id), ['x1', 'x2', 'x3', 'x4', 'x5', 'x6']);
+  assert.match(bad.rejected[0].reason, /fora da base/);
+  assert.match(bad.rejected[1].reason, /não é do exterior/);
+  assert.match(bad.rejected[2].reason, /outro grupo/);
+  assert.match(bad.rejected[3].reason, /mais urnas/);
+  assert.match(bad.rejected[5].reason, /sem zona na base/);
+  assert.equal(st.compute().diagnostics.external.rejected.length, 6);
+
+  assert.equal(st.clearExternalGroups(), true);
+  assert.equal(st.compute().progress.unitsWithData, 0);
+});
+
+test('grupos externos: troca para o TSE cidade a cidade (st oficial ≥ st do grupo, ou zonas completas)', () => {
+  const { st, idA, idB, idC } = mkExtState();
+  const g1 = { id: '90001', name: 'Sydney', memberIds: [idA, idB], y: [700, 600, 100, 100, 500], E: 3000, s: 20, st: 6, source: 'jr' };
+  const g2 = { id: '90002', name: 'Wellington', memberIds: [idC], y: [300, 100, 5, 5, 90], E: 500, s: 4, st: 4, source: 'bu' };
+  st.setExternalGroups([g1, g2]);
+  // TSE publica 2 urnas de Sydney: o grupo (6 urnas) continua valendo e esconde a zona oficial
+  st.update(idA, { y: [100, 90, 3, 3, 50], s: 10, st: 2 });
+  let out = st.compute(), ex = out.diagnostics.external;
+  assert.equal(ex.groups, 2);
+  assert.equal(ex.ahead, 6 - 2 + 4);
+  assert.deepEqual(ex.maskedVotes, [100, 90, 3, 3, 50], 'votos oficiais escondidos pelo grupo ficam no diagnóstico');
+  near(out.br.counted.L, 700 + 300, 1e-6, 'zona oficial não soma duas vezes');
+  // TSE chega a 6 urnas na cidade (somando as zonas): Sydney sai sozinho, Wellington fica
+  st.update(idB, { y: [300, 250, 5, 5, 100], s: 10, st: 4 });
+  out = st.compute(); ex = out.diagnostics.external;
+  assert.equal(ex.groups, 1);
+  assert.deepEqual(ex.supersededNames, ['Sydney']);
+  assert.deepEqual(ex.names, ['Wellington']);
+  near(out.br.counted.L, 100 + 300 + 300, 1e-6);
+  // Wellington: zona oficial completa com menos urnas que o grupo diz (o feed contou a mais) também troca
+  st.update(idC, { y: [280, 90, 4, 4, 80], s: 3, st: 3 });
+  ex = st.compute().diagnostics.external;
+  assert.equal(ex.groups, 0);
+  assert.equal(ex.superseded, 2);
+});
+
+test('grupos externos: cidade fora da base entra como grupo sem membro (xBase) e s pode passar das seções da base', () => {
+  const { w, st, idC, first } = mkExtState();
+  const K = w.rows.length;
+  const before = st.compute();
+  const r = st.setExternalGroups([
+    { id: '99001', mun: '99001', name: 'Hanói', memberIds: [], xBase: first.slice(), E: 120, s: 1, st: 1, y: [20, 10, 0, 1, 40], source: 'asc' },
+    { id: '90002', name: 'Wellington', memberIds: [idC], y: [30, 10, 0, 0, 20], E: 500, s: 7, st: 6, source: 'bu' },
+    { id: '99002', name: 'Sem composição', memberIds: [], xBase: new Array(K).fill(0), E: 10, s: 1, st: 1, y: [1, 0, 0, 0, 0] },
+  ]);
+  assert.equal(r.accepted, 2);
+  assert.match(r.rejected[0].reason, /sem composição/);
+  const out = st.compute();
+  assert.equal(out.progress.unitsTotal, before.progress.unitsTotal + 1, 'grupo sem membro soma uma unidade; Wellington troca 1 por 1');
+  assert.equal(out.progress.sectionsTotal, before.progress.sectionsTotal - 4 + 1 + 7, 's do grupo (7) vale sobre as 4 seções da base');
+  near(out.br.E, before.br.E + 120, 1e-6, 'eleitorado da cidade nova entra no total');
+  near(out.br.counted.L, 50, 1e-6);
 });
 
 // ---------- 2T-1.2: curva de chegada, xc explícito e faixa calibrada ----------

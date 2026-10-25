@@ -6,6 +6,12 @@ REPO=..
 : "${JAVA_HOME:=/data/data/com.termux/files/usr/lib/jvm/java-21-openjdk}"
 export JAVA_HOME
 
+# O aapt2 do Termux depende da libc++ atual; põe essa biblioteca antes de cópias antigas de ferramentas no LD_LIBRARY_PATH.
+if [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/lib" ]; then
+  LD_LIBRARY_PATH="$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  export LD_LIBRARY_PATH
+fi
+
 if [ ! -f local.properties ] && [ -z "${ANDROID_HOME:-}" ]; then
   echo "Falta o Android SDK: crie android-t2/local.properties com sdk.dir=... ou defina ANDROID_HOME. Veja a seção 'APK do 2º turno' do README." >&2
   exit 1
@@ -36,4 +42,5 @@ echo "==> Pacote"
 aapt dump badging "$OUT" | head -3
 mkdir -p build
 cp "$OUT" build/placar-2t.apk
+chmod 644 build/placar-2t.apk
 echo "APK pronto: $(pwd)/build/placar-2t.apk"

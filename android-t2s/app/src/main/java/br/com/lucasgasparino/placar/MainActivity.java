@@ -21,8 +21,14 @@ import android.webkit.WebViewClient;
 import android.widget.TextView;
 
 import java.io.IOException;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 
 public final class MainActivity extends Activity {
     private static final String APP_HOST = "appassets.androidplatform.net";
@@ -72,6 +78,9 @@ public final class MainActivity extends Activity {
                     }
 
                     String path = uri.getPath();
+                    if (path != null && (path.startsWith("/jr/") || path.startsWith("/asc/"))) {
+                        return fetchExterior(uri);
+                    }
                     String assetPath = path != null && path.startsWith("/assets/")
                             ? path.substring("/assets/".length()) : "";
                     if (assetPath.isEmpty() || assetPath.contains("..") || assetPath.startsWith("/")) {
@@ -205,6 +214,76 @@ public final class MainActivity extends Activity {
         byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         return new WebResourceResponse(mime, "UTF-8", status, reason,
                 Collections.emptyMap(), new java.io.ByteArrayInputStream(bytes));
+    }
+
+    /* Proxy local da prévia do exterior: só três endereços fixos (Jornal Razão e ascaribe), nunca host/path vindo do JavaScript.
+       Roda na thread de rede do WebView (shouldInterceptRequest) e o fetch do JavaScript é assíncrono: a tela não trava. */
+    private WebResourceResponse fetchExterior(Uri uri) {
+        String path = uri.getPath();
+        String remote;
+        if ("/jr/v.json".equals(path)) {
+            if (!validQuery(uri, "_", false)) return response(400, "Bad Request", "text/plain", "Invalid version query");
+            remote = "https://jornalrazao.com/eleicoes/d2/v.json";
+        } else if ("/jr/ext.json".equals(path)) {
+            if (!validQuery(uri, "v", true)) return response(400, "Bad Request", "text/plain", "Invalid data version");
+            remote = "https://jornalrazao.com/eleicoes/d2/ext.json?v=" + uri.getQueryParameter("v");
+        } else if ("/asc/exterior.json".equals(path)) {
+            if (!validQuery(uri, "_", false)) return response(400, "Bad Request", "text/plain", "Invalid query");
+            remote = "https://dados.ascaribe.tech/real/exterior.json";
+        } else {
+            return response(404, "Not Found", "text/plain", "Not found");
+        }
+
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(remote).openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            connection.setInstanceFollowRedirects(false);
+            connection.setUseCaches(false);
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("User-Agent", "Placar-2T-Secao/1.1.3");
+            int status = connection.getResponseCode();
+            InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            byte[] body = readLimited(stream, 2 * 1024 * 1024);
+            String reason = status == 200 ? "OK" : (status == 404 ? "Not Found" : "Upstream response");
+            return proxyResponse(status, reason, "application/json", body);
+        } catch (Exception exception) {
+            return response(502, "Bad Gateway", "text/plain", "Upstream unavailable");
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private boolean validQuery(Uri uri, String key, boolean required) {
+        java.util.Set<String> names = uri.getQueryParameterNames();
+        if (!required && names.isEmpty()) return true;
+        if (names.size() != 1 || !names.contains(key)) return false;
+        String value = uri.getQueryParameter(key);
+        return value != null && value.matches("[0-9]{1,20}");
+    }
+
+    private byte[] readLimited(InputStream stream, int maxBytes) throws IOException {
+        if (stream == null) return new byte[0];
+        try (InputStream input = stream; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int read, total = 0;
+            while ((read = input.read(buffer)) != -1) {
+                total += read;
+                if (total > maxBytes) throw new IOException("response too large");
+                output.write(buffer, 0, read);
+            }
+            return output.toByteArray();
+        }
+    }
+
+    private WebResourceResponse proxyResponse(int status, String reason, String mime, byte[] body) {
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Cache-Control", "no-store");
+        headers.put("Access-Control-Allow-Origin", "https://" + APP_HOST);
+        return new WebResourceResponse(mime, "UTF-8", status, reason, headers,
+                new java.io.ByteArrayInputStream(body));
     }
 
     private String mimeType(String path) {

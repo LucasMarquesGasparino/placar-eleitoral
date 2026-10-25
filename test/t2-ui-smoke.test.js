@@ -22,9 +22,11 @@ function makeEl(id) {
     },
     setAttribute() {}, removeAttribute() {}, getAttribute() { return null; },
     addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
+    fire(type, ev) { (listeners[type] || []).forEach((fn) => fn(ev || { target: this })); },
     appendChild(child) { this.children.push(child); return child; },
     replaceChildren() { this.children = []; },
     scrollIntoView() {},
+    focus() { this.focused = true; },
     closest() { return null; },
   };
 }
@@ -46,9 +48,13 @@ function makeContext(pre) {
     setItem: (k, v) => { store.set(k, String(v)); },
     removeItem: (k) => { store.delete(k); },
   };
-  // Arquivos locais (data/t2/*.json) vêm do disco; qualquer URL do TSE responde 404 (sem rede).
+  // Arquivos locais vêm do disco; qualquer URL de rede (TSE/Jornal Razão) responde 404 (sem rede).
   const fetch = async (url) => {
     if (/^data\/t2\/[\w.-]+\.json$/.test(String(url))) {
+      const body = fs.readFileSync(path.join(ROOT, String(url)), 'utf8');
+      return { ok: true, status: 200, json: async () => JSON.parse(body) };
+    }
+    if (String(url) === 'data/exterior-country-map.json') {
       const body = fs.readFileSync(path.join(ROOT, String(url)), 'utf8');
       return { ok: true, status: 200, json: async () => JSON.parse(body) };
     }
@@ -68,7 +74,7 @@ function makeContext(pre) {
 
 async function boot(pre) {
   const m = makeContext(pre);
-  for (const f of ['t2-engine.js', 't2-state.js', 't2-fetchq.js', 't2-sim.js', 't2-tse.js', 't2.js']) {
+  for (const f of ['t2-engine.js', 't2-state.js', 't2-fetchq.js', 't2-sim.js', 't2-tse.js', 't2-ext.js', 't2.js']) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), m.ctx, { filename: f });
   }
   const deadline = Date.now() + 15000;
@@ -81,7 +87,7 @@ async function boot(pre) {
 
 test('tela do 2T: carrega, mostra PRÉVIA/zero oficial e renderiza cada estado de conexão sem lançar', async () => {
   const { ctx, cache } = makeContext();
-  for (const f of ['t2-engine.js', 't2-state.js', 't2-fetchq.js', 't2-sim.js', 't2-tse.js', 't2.js']) {
+  for (const f of ['t2-engine.js', 't2-state.js', 't2-fetchq.js', 't2-sim.js', 't2-tse.js', 't2-ext.js', 't2.js']) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
   }
   const $ = (id) => ctx.document.getElementById(id);
@@ -142,6 +148,209 @@ test('tela do 2T: carrega, mostra PRÉVIA/zero oficial e renderiza cada estado d
     ctx.T2App.app.poller.stop();
   }
   assert.ok(cache.size > 0);
+});
+
+function fakeExtStatus(now) {
+  return {
+    running: true, inFlight: false, cycles: 3, intervalMs: 60000, lastSyncAt: now - 20000, nextSyncAt: now + 40000, lastError: '',
+    totals: { urnas: 31, total: 1351, L: 5853, F: 3079, B: 106, N: 167, A: 12319, aptos: 21524, c: 9205, cities: 3, est: true },
+    countries: [
+      { name: 'Austrália', urnas: 26, total: 29, L: 5435, F: 2978, B: 102, N: 164, sources: ['bu', 'jr'], cities: 2, est: true, complete: false },
+      { name: 'Nova Zelândia', urnas: 5, total: 5, L: 418, F: 101, B: 4, N: 3, sources: ['bu'], cities: 1, est: false, complete: true },
+    ],
+    groups: 3, bySource: { bu: 24, jr: 7, asc: 0 }, skipped: [], rejected: [],
+    sources: {
+      bu: { urnas: 24, cities: 2, state: 'idle', requests: 40, misses: 10, errors: 0, lastAt: now - 60000, pending: 0, blockedUntil: 0, stopAt: 0, csUrnas: 1351, lastError: '' },
+      jr: { urnas: 31, version: 42, paused: false, at: now - 30000, lastBuAt: now - 60000, lastSuccessAt: now - 20000, lastError: '', problems: [] },
+      asc: { urnas: 30, at: now - 90000, lastSuccessAt: now - 20000, lastError: 'HTTP 502', problems: [] },
+    },
+  };
+}
+
+test('tela do 2T: prévia do exterior (boletins de urna) antes do TSE; painel nacional do TSE depois, com as urnas ainda fora', async () => {
+  const { ctx } = await boot();
+  try {
+    const T = ctx.T2App, $ = (id) => ctx.document.getElementById(id);
+    assert.match(T.app.extNote, /só funciona no aplicativo/, 'no navegador a prévia fica desligada e avisa');
+    assert.match($('t2-off-sync').textContent, /^Prévia do exterior desligada: a prévia do exterior só funciona no aplicativo/);
+    T.app.extNote = '';
+    T.app.extStatus = fakeExtStatus(Date.now());
+    T.renderOfficial({ phase: 'pre', official: null });
+    assert.equal($('t2-off-eyebrow').textContent, 'PRÉVIA DO EXTERIOR · BOLETINS DE URNA');
+    assert.equal($('t2-off-title').textContent, 'Urnas do exterior recebidas:');
+    assert.equal($('t2-off-sections').textContent, '31 de 1.351 urnas · 3 cidades');
+    assert.equal($('t2-off-L-votes').textContent, '5.853 votos');
+    assert.equal($('t2-off-F-votes').textContent, '3.079 votos');
+    assert.equal($('t2-off-sources').classList.contains('hidden'), false);
+    const extra = $('t2-off-extra').textContent;
+    assert.ok(extra.includes('Brancos 106 · Nulos 167 · Abstenção 12.319 nas urnas recebidas'), extra);
+    assert.ok(extra.includes('urnas por fonte: boletins lidos do TSE 24, Jornal Razão 7'), extra);
+    assert.ok(extra.includes('estimados em parte das cidades'), extra);
+    const sync = $('t2-off-sync').textContent;
+    assert.match(sync, /^Exterior sincronizado às \d\d:\d\d:\d\d · próxima em (39|40) s · urnas: boletins do TSE 24 · Jornal Razão 31 · ascaribe com erro$/);
+    assert.equal($('t2-off-countries').classList.contains('hidden'), false);
+    assert.equal($('t2-off-countries-sum').textContent, 'Por país: 2 países com urnas recebidas');
+    const list = $('t2-off-country-list').children.map((li) => li.textContent);
+    assert.ok(list[0].startsWith('Austrália · parcial · 26 de 29 urnas · Lula 5.435 × Flávio 2.978'), list[0]);
+    assert.ok(list[0].endsWith('boletins do TSE + Jornal Razão · abstenção estimada'), list[0]);
+    assert.ok(list[1].startsWith('Nova Zelândia · completo · 5 de 5 urnas'), list[1]);
+    assert.match(T.extDiagText(null), /Prévia do exterior: 31 urnas em 3 cidades/);
+
+    // 17h: primeiro arquivo nacional com seções -> painel nacional do TSE; urnas da prévia que o TSE ainda não tem aparecem à parte
+    T.app.lastOutput = Object.assign({}, T.app.lastOutput, { diagnostics: Object.assign({}, T.app.lastOutput.diagnostics, { external: { ahead: 12 } }) });
+    const official = { y: [60e6, 58e6, 2e6, 3e6, 30e6], E: 158745007, s: 499206, st: 250000 };
+    T.renderOfficial({ phase: 'live', official });
+    assert.equal($('t2-off-eyebrow').textContent, 'APURAÇÃO OFICIAL · TSE');
+    assert.equal($('t2-off-title').textContent, 'Seções apuradas:');
+    assert.equal($('t2-off-sections').textContent, '250.000 de 499.206 seções');
+    assert.equal($('t2-off-sources').classList.contains('hidden'), true);
+    assert.equal($('t2-off-countries').classList.contains('hidden'), true);
+    assert.ok($('t2-off-extra').textContent.includes('+ 12 urnas do exterior ainda fora do TSE'), $('t2-off-extra').textContent);
+  } finally {
+    ctx.T2App.app.poller.stop();
+  }
+});
+
+test('tela do 2T: Estados e Municípios mostram 2º turno 2022 e 1º turno 2026 ao lado da projeção', async () => {
+  const { ctx } = await boot();
+  try {
+    const T = ctx.T2App, $ = (id) => ctx.document.getElementById(id);
+    const rows = $('t2-ufs').children;
+    assert.ok(rows.length >= 27);
+    const sp = rows.find((r) => r.children[0].children[0] && r.children[0].children[0].dataset.uf === 'SP');
+    const cells = sp.children.map((c) => c.textContent);
+    assert.equal(cells.length, 8);
+    // ordem: nome, apurado, à frente, projeção, 2º turno 2022, atual (entre as duas referências), 1º turno 2026, vantagem × 2022 (votos)
+    assert.ok(['Lula', 'Flávio', 'Empate'].includes(cells[2]));
+    assert.match(cells[3], /^\d{2},\d{2}% \/ \d{2},\d{2}%$/);
+    assert.equal(cells[4], '44,76% / 55,24%', 'SP no 2º turno de 2022 (oficial: Lula 44,76%)');
+    assert.equal(cells[5], '—', 'sem apuração ainda');
+    assert.match(cells[6], /^\d{2},\d{2}% \/ \d{2},\d{2}%$/);
+    assert.equal(cells[7], '—', 'sem apuração, sem vantagem × 2022');
+    T.renderMunicipalities('SP');
+    const capital = $('t2-municipal-rows').children[0].children.map((c) => c.textContent);
+    // município sem projeção e sem margem: nome, apurado, à frente, 2º turno 2022, atual, 1º turno 2026, vantagem × 2022 (votos)
+    assert.equal(capital[0], 'SÃO PAULO');
+    assert.equal(capital.length, 7);
+    assert.equal(capital[6], '—', 'sem apuração, sem vantagem × 2022');
+    // a UF aberta fica marcada; refreshView sem dado novo não recria as linhas de Estados
+    const spRow = $('t2-ufs').children.find((r) => r.children[0].children[0] && r.children[0].children[0].dataset.uf === 'SP');
+    assert.equal(spRow.classList.contains('is-open'), true);
+    T.refreshView();
+    assert.equal($('t2-ufs').children.find((r) => r.children[0].children[0] && r.children[0].children[0].dataset.uf === 'SP'), spRow);
+    assert.ok(['Lula', 'Flávio', 'Empate'].includes(capital[2]));
+    assert.equal(capital[3], '53,54% / 46,46%');
+    assert.equal(capital[4], '—');
+    assert.match(capital[5], /^\d{2},\d{2}% \/ \d{2},\d{2}%$/);
+    // "Ver em votos" nas duas tabelas: votos absolutos nas colunas Lula/Flávio e margem em votos; volta para percentuais
+    const fmtVotes = (l, f) => `${Math.round(l).toLocaleString('pt-BR')} / ${Math.round(f).toLocaleString('pt-BR')}`;
+    const spOut = T.app.lastOutput.ufs.SP;
+    $('t2-ufs-toggle').fire('click');
+    assert.equal($('t2-ufs-toggle').textContent, 'Ver em percentuais');
+    const spV = $('t2-ufs').children.find((r) => r.children[0].children[0] && r.children[0].children[0].dataset.uf === 'SP').children.map((c) => c.textContent);
+    assert.equal(spV[3], fmtVotes(spOut.final.L, spOut.final.F));
+    assert.equal(spV[4], fmtVotes(spOut.vs22.votosL, spOut.vs22.votosF));
+    assert.equal(spV[6], fmtVotes(spOut.t1.votosL, spOut.t1.votosF));
+    assert.equal(spV.length, 8);
+    assert.equal(spV[7], '—', 'vantagem × 2022 é sempre em votos; sem apuração, —');
+    assert.ok(spOut.vs22.votosL > 11e6 && spOut.vs22.votosL < 11.6e6, 'SP 2022: Lula teve 11,52 milhões no 2º turno');
+    $('t2-ufs-toggle').fire('click');
+    assert.equal($('t2-ufs').children.find((r) => r.children[0].children[0] && r.children[0].children[0].dataset.uf === 'SP').children[4].textContent, '44,76% / 55,24%');
+    $('t2-mun-toggle').fire('click');
+    const capV = $('t2-municipal-rows').children[0].children.map((c) => c.textContent);
+    assert.equal(capV[0], 'SÃO PAULO');
+    assert.match(capV[3], /^\d{1,3}(\.\d{3})+ \/ \d{1,3}(\.\d{3})+$/);
+    assert.match(capV[5], /^\d{1,3}(\.\d{3})+ \/ \d{1,3}(\.\d{3})+$/);
+    assert.equal(capV.length, 7, 'em votos também sem a coluna de margem');
+    assert.equal(T.app.munUf, 'SP');
+    $('t2-mun-toggle').fire('click');
+    assert.equal($('t2-municipal-rows').children[0].children[3].textContent, '53,54% / 46,46%');
+  } finally {
+    ctx.T2App.app.poller.stop();
+  }
+});
+
+test('tela do 2T (APK): código de eleição salvo volta para 6258 com aviso, estado salvo antes das 17h é descartado e a prévia sincroniza', async () => {
+  const RealDate = Date, at = Date.UTC(2026, 9, 25, 13, 0, 0), off = at - RealDate.now();     // 10:00 de Brasília
+  class FakeDate extends RealDate {
+    constructor(...a) { if (a.length) super(...a); else super(RealDate.now() + off); }
+    static now() { return RealDate.now() + off; }
+  }
+  const jrIndex = { f: { ext: 7 }, t: '2026-10-25T04:30:44-03:00' };
+  const nz = { iso: 'NZ', nm: 'Nova Zelândia', urnas: 5, total: 5, aptos: 3119, c: 526, f: 101, l: 418, vb: 4, vn: 3, ult: '2026-10-25T01:51:38-03:00',
+    cid: [{ nm: 'Wellington', urnas: 5, total: 5, f: 101, l: 418, c: 526 }] };
+  const asc = { updated_at: '2026-10-25T05:01:03-03:00', exterior: [{ pais: 'Austrália', codigo_tse: '29491', urnas_totais: 10, urnas_apuradas: 7, votos_validos: 1784, lula: 1274, flavio: 510 }] };
+  const hits = [];
+  const { ctx } = await boot((c) => {
+    c.Date = FakeDate;
+    c.location = { search: '', hostname: 'appassets.androidplatform.net' };
+    c.localStorage.setItem('t2.eleicao', '6257');
+    c.localStorage.setItem('t2.state.v1', JSON.stringify({ v: 1, updates: { 'SP|71072|0001': { y: [1, 1, 0, 0, 0], E: 10, s: 1, st: 1 } } }));
+    c.localStorage.setItem('t2.state.election', '6258');
+    const base = c.fetch;
+    c.fetch = async (url, opt) => {
+      const u = String(url);
+      const json = (v) => ({ ok: true, status: 200, json: async () => v });
+      if (u.startsWith('/jr/v.json?_=')) { hits.push('v'); return json(jrIndex); }
+      if (u === '/jr/ext.json?v=7') { hits.push('ext'); return json({ t: '2026-10-25T04:30:44-03:00', tot: {}, paises: [nz] }); }
+      if (u.startsWith('/asc/exterior.json?_=')) { hits.push('asc'); return json(asc); }
+      return base(url, opt);
+    };
+  });
+  const T = ctx.T2App, $ = (id) => ctx.document.getElementById(id);
+  try {
+    assert.equal(T.app.electionCode, '6258');
+    assert.match(T.app.notice, /código de eleição 6257 gravado no Diagnóstico; voltou para o 2º turno \(6258\)/);
+    assert.equal(ctx.localStorage.getItem('t2.eleicao'), null);
+    assert.equal(ctx.localStorage.getItem('t2.state.v1'), null, 'antes das 17h nada do 2º turno pode estar salvo');
+    assert.equal(T.app.state.exportState().updates['SP|71072|0001'], undefined, 'o estado salvo não foi importado');
+    assert.equal(T.app.extNote, '');
+    // detalhe do exterior aberto ANTES da prévia chegar: tem de acompanhar sozinho (antes ficava congelado até um toque)
+    T.renderMunicipalities('ZZ', false);
+    const deadline = Date.now() + 10000;
+    while (!(T.app.extStatus && T.app.extStatus.sources.jr.urnas > 0 && T.app.extStatus.sources.asc.urnas > 0)) {
+      if (Date.now() > deadline) throw new Error('a prévia não sincronizou: ' + JSON.stringify(T.app.extStatus && T.app.extStatus.sources));
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.deepEqual(hits.slice(0, 3).sort(), ['asc', 'ext', 'v']);
+    const ext = T.app.state.compute().diagnostics.external;
+    assert.equal(ext.groups, 2, 'Wellington (JR) e Camberra (ascaribe) entram na projeção');
+    assert.equal(ext.bySource.jr, 5);
+    assert.equal(ext.bySource.asc, 7);
+    T.refreshView();
+    assert.equal($('t2-off-eyebrow').textContent, 'PRÉVIA DO EXTERIOR · BOLETINS DE URNA');
+    assert.equal($('t2-off-L-votes').textContent, '1.692 votos');
+    assert.match($('t2-alert').textContent, /6257/);
+    assert.equal(T.app.ext.status().running, true);
+    // cartões da apuração: o 2º turno de 2022 nas mesmas zonas (cidades) já apuradas
+    const ap22 = T.app.lastOutput.vs2022.apurado;
+    assert.ok(ap22 && ap22.lula22 > 0.5 && ap22.lula22 < 1, 'Lula venceu em 2022 em Wellington e Camberra');
+    const pct = (p) => `${(p * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+    assert.equal($('t2-off-L-22').textContent, `2022, mesmas zonas: ${pct(ap22.lula22)}${ap22.cobertura < 0.99 ? ' *' : ''}`);
+    assert.match($('t2-off-F-22').textContent, /^Bolsonaro 2022, mesmas zonas: \d{1,2},\d{2}%/);
+    assert.equal($('t2-off-L-22').classList.contains('hidden'), false);
+    // detalhe do exterior: todas as cidades, as que já têm votos primeiro (fora das 15 maiores), com o país — já atualizado pelo refreshView
+    const zzRows = $('t2-municipal-rows').children.map((r) => r.children[0].textContent);
+    assert.equal(zzRows.length, T.app.state.municipios('ZZ', 100000).length);
+    assert.ok(zzRows.length > 100);
+    assert.deepEqual(zzRows.slice(0, 2).sort(), ['CAMBERRA · Austrália', 'WELLINGTON · Nova Zelândia']);
+    assert.match($('t2-mun-footer').textContent, /^Exterior: todas as \d+ cidades/);
+    const zzMun = T.app.state.municipios('ZZ', 100000).filter((m) => m.ec > 0);
+    zzMun.forEach((m) => assert.ok(m.d22 && Number.isFinite(m.d22.votos), `${m.nome}: vantagem × 2022 calculada`));
+    const zz0 = $('t2-municipal-rows').children[0].children;
+    assert.match(zz0[zz0.length - 1].textContent, /^[+−]\d/);
+    // Fechar volta à UF (foco no botão ZZ) e desmarca a linha
+    $('t2-mun-close').fire('click');
+    assert.equal(T.app.munUf, '');
+    assert.equal($('t2-municipal-panel').classList.contains('hidden'), true);
+    const zzBtn = $('t2-ufs').children.find((r) => r.children[0].children[0] && r.children[0].children[0].dataset.uf === 'ZZ').children[0].children[0];
+    assert.equal(zzBtn.focused, true);
+    T.renderMunicipalities('SP');
+    assert.equal($('t2-municipal-rows').children.length, 15);
+  } finally {
+    if (T.app.ext) T.app.ext.stop();
+    T.app.poller.stop();
+  }
 });
 
 test('tela do 2T: faixa calibrada "± p.p.", "Indefinido" quando 50% cabe na faixa, e diagnósticos da curva', async () => {
